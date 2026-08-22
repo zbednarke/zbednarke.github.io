@@ -28,17 +28,38 @@ Runtime configuration:
 - `GCS_BUCKET`
 - `GCP_SERVICE_ACCOUNT`
 - `PUBLIC_SHARE_BASE_URL` (defaults to `https://zachbednarke.com/jazz/share`)
+- `FFMPEG_PATH` (defaults to `ffmpeg`; the production image includes it)
 - `PORT` (defaults to `8080`)
 
 `JAZZ_ALLOW_INSECURE_LOCAL=1` is available only for local development.
 
-## Legacy WebM seek repair
+## Clip Studio renders
 
-Browser recordings created with the old one-second MediaRecorder timeslice do
-not contain a duration or cue index. `cmd/repair-video-index` losslessly remuxes
-those objects, keeps each original beside it as
-`video.original-unindexed.webm`, verifies the packet-preserving output, and
-refreshes the recording's GCS metadata in Postgres. It is dry-run by default:
+Clip Studio render requests are authenticated, limited to 24 clips and ten
+minutes, and stream directly from the private recording bucket through FFmpeg
+back into the bucket. The output is a 1080p H.264 MP4 with the separate WAV
+masters encoded as lossless 48 kHz ALAC audio. Render objects live under the
+`renders/` prefix and receive a GCS custom timestamp. Apply
+`deploy/jazz-recordings-lifecycle.json` to the recordings bucket so those
+temporary outputs are removed after one day. Cloud Run must allow long requests
+for the synchronous MVP renderer. Deploy it with a 60-minute request timeout,
+2 vCPU, 2 GiB memory, concurrency 1, and at least two instances so an encode
+cannot starve ordinary API traffic:
+
+```sh
+gcloud run deploy jazz-api --source . --region us-central1 \
+  --timeout 3600 --cpu 2 --memory 2Gi --concurrency 1 --max-instances 3
+```
+
+## Playback optimization
+
+Browser-created WebM and fragmented MP4 recordings can require long scans before
+their duration and seek index are usable. `cmd/repair-video-index` losslessly
+remuxes those objects, moves MP4 metadata to the front, writes WebM cues, applies
+a ten-minute private browser-cache policy, and keeps each original beside the
+optimized file as `video.original-unindexed.*`. It verifies that the codecs and
+size remain packet-preserving and refreshes GCS metadata in Postgres. It is
+dry-run by default:
 
 ```sh
 go run ./cmd/repair-video-index -all
@@ -46,5 +67,6 @@ go run ./cmd/repair-video-index -id RECORDING_UUID -apply
 ```
 
 `Dockerfile.repair` and `cloudbuild.repair.yaml` package the same command for
-the `jazz-video-index-repair` Cloud Run job so large archives can be repaired
-inside the bucket's region.
+the `jazz-video-index-repair` Cloud Run job so large recordings can be repaired
+inside the bucket's region. Run the job periodically with `-all -apply`; it
+selects only recordings whose `video_playback_optimized` flag is false.

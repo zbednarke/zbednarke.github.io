@@ -252,24 +252,24 @@
           <h1 id="clip-studio-title">Clip Studio</h1>
           <p>Find the stretches where the horn is active, listen closely, and turn the best moments into an edit queue.</p>
         </div>
-        <div class="clip-studio-date-nav">
-          <button type="button" id="studio-previous-day" aria-label="Previous day">‹</button>
-          <label><span>Practice day</span><input id="studio-date" type="date"></label>
-          <button type="button" id="studio-next-day" aria-label="Next day">›</button>
+        <div class="clip-studio-header-tools">
+          <details class="studio-scan-menu" id="studio-scan-menu">
+            <summary><i></i><span id="studio-scan-state">Checking analysis</span></summary>
+            <div><strong id="studio-scan-detail">Loading this day’s analysis state…</strong><button type="button" id="studio-scan">Rescan this day</button></div>
+          </details>
+          <div class="clip-studio-date-nav">
+            <button type="button" id="studio-previous-day" aria-label="Previous day">‹</button>
+            <label><span>Practice day</span><input id="studio-date" type="date"></label>
+            <button type="button" id="studio-next-day" aria-label="Next day">›</button>
+          </div>
         </div>
       </header>
-
-      <div class="clip-studio-notice">
-        <span>Activity scan · waveform v1</span>
-        <p>This first pass finds sustained, continuous sound in the lossless master. It proposes listening points—it does not pretend to grade your playing.</p>
-        <button class="button button-primary" id="studio-scan" type="button">Scan this day</button>
-      </div>
 
       <div class="clip-studio-summary" aria-live="polite">
         <div><span>Recorded</span><strong id="studio-total-time">0:00</strong></div>
         <div><span>Takes</span><strong id="studio-take-count">0</strong></div>
         <div><span>Suggestions</span><strong id="studio-candidate-count">0</strong></div>
-        <p id="studio-status" role="status">Choose a practice day.</p>
+        <div class="clip-studio-summary-status"><span>Status</span><strong id="studio-status" role="status">Choose a practice day</strong></div>
       </div>
 
       <div class="clip-studio-workspace">
@@ -278,28 +278,41 @@
           <div id="studio-recordings"><p class="clip-studio-empty">Loading recordings…</p></div>
         </section>
 
-        <section class="clip-studio-candidates" aria-labelledby="studio-candidates-title">
-          <header><span>Listening queue</span><h2 id="studio-candidates-title">Suggested moments</h2></header>
-          <div id="studio-candidate-list"><p class="clip-studio-empty">Run an activity scan to create suggestions.</p></div>
-        </section>
+        <div class="clip-studio-right-column">
+          <aside class="clip-studio-preview" id="studio-preview" aria-labelledby="studio-preview-title">
+            <header><span id="studio-playback-mode">Focused playback</span><small id="studio-buffer-status" hidden></small><h2 id="studio-preview-title">Choose a suggestion</h2></header>
+            <div id="studio-media"><p class="clip-studio-empty">Choose a suggested region, or click anywhere in a waveform to browse a complete take.</p></div>
+            <div class="clip-studio-editor" id="studio-editor" hidden>
+              <div class="clip-studio-boundaries">
+                <label><span>In · seconds</span><input id="studio-start" type="number" min="0" step="0.1"></label>
+                <label><span>Out · seconds</span><input id="studio-end" type="number" min="0" step="0.1"></label>
+              </div>
+              <button class="studio-add-output" type="button" id="studio-add-output">Add to Output</button>
+              <label class="clip-studio-notes"><span>Editor note</span><textarea id="studio-candidate-notes" rows="4" maxlength="2000" placeholder="Why is this worth keeping? What needs trimming?"></textarea></label>
+              <div class="clip-studio-review-actions">
+                <button type="button" id="studio-reject">Reject suggestion</button>
+              </div>
+            </div>
+            <div class="clip-studio-raw-notice" id="studio-raw-notice" hidden>Browsing raw recording · playback continues until you pause it.</div>
+          </aside>
 
-        <aside class="clip-studio-preview" id="studio-preview" aria-labelledby="studio-preview-title">
-          <header><span>Focused playback</span><h2 id="studio-preview-title">Choose a suggestion</h2></header>
-          <div id="studio-media"><p class="clip-studio-empty">The preview will stop automatically at the candidate’s out point.</p></div>
-          <div class="clip-studio-editor" id="studio-editor" hidden>
-            <div class="clip-studio-boundaries">
-              <label><span>In · seconds</span><input id="studio-start" type="number" min="0" step="0.1"></label>
-              <label><span>Out · seconds</span><input id="studio-end" type="number" min="0" step="0.1"></label>
-              <button type="button" id="studio-save-boundaries">Save boundaries</button>
-            </div>
-            <label class="clip-studio-notes"><span>Editor note</span><textarea id="studio-candidate-notes" rows="4" maxlength="2000" placeholder="Why is this worth keeping? What needs trimming?"></textarea></label>
-            <div class="clip-studio-review-actions">
-              <button type="button" id="studio-reject">Reject</button>
-              <button type="button" id="studio-keep">Keep for edit</button>
-            </div>
-          </div>
-        </aside>
+          <section class="clip-studio-candidates" aria-labelledby="studio-candidates-title">
+            <header><span>Listening queue</span><h2 id="studio-candidates-title">Suggested moments</h2></header>
+            <div id="studio-candidate-list"><p class="clip-studio-empty">Suggestions will appear after this day is analyzed.</p></div>
+          </section>
+        </div>
       </div>
+
+      <footer class="studio-output-dock" aria-labelledby="studio-output-title">
+        <div class="studio-output-heading"><span>Output timeline</span><strong id="studio-output-duration">00:00</strong></div>
+        <div class="studio-output-clips" id="studio-output-clips"><p>Use Add to Output to begin an edit.</p></div>
+        <div class="studio-render-controls">
+          <label><span>Project / filename</span><input id="studio-output-title" maxlength="120" value="Jazz practice"></label>
+          <details class="studio-quality"><summary>1080p · Lossless audio</summary><p><b>Video:</b> 1080p H.264, CRF 18<br><b>Audio:</b> lossless ALAC, 48 kHz, original levels<br>No normalization or transitions.</p></details>
+          <button type="button" id="studio-render">Render Output</button>
+          <span id="studio-render-status" role="status"></span>
+        </div>
+      </footer>
     </section>
 
     <section class="guide-tone-screen" id="guide-tones" aria-labelledby="guide-tone-title" hidden>
@@ -516,6 +529,7 @@
   <script src="../assets/jazz/recording.js"></script>
   <script src="../assets/jazz/archive-utils.js"></script>
   <script src="../assets/jazz/archive.js"></script>
+  <script src="../assets/jazz/clip-studio-model.js"></script>
   <script src="../assets/jazz/clip-studio.js"></script>
   <script src="../assets/jazz/guide-tone-trainer.js"></script>
 </body>

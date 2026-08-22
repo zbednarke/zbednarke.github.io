@@ -138,38 +138,39 @@ type recordingUpdateRequest struct {
 }
 
 type recordingRow struct {
-	ID               uuid.UUID `json:"id"`
-	ContentType      string    `json:"contentType"`
-	Codec            string    `json:"codec,omitempty"`
-	SizeBytes        int64     `json:"sizeBytes,omitempty"`
-	DurationMS       int       `json:"durationMs,omitempty"`
-	SampleRate       int       `json:"sampleRate,omitempty"`
-	Channels         int       `json:"channels,omitempty"`
-	RecordedAt       time.Time `json:"recordedAt"`
-	Status           string    `json:"status"`
-	TuneID           string    `json:"tuneId,omitempty"`
-	MissionID        string    `json:"missionId,omitempty"`
-	SkillIDs         []string  `json:"skillIds"`
-	TakeNumber       int       `json:"takeNumber,omitempty"`
-	Notes            string    `json:"notes,omitempty"`
-	SessionID        string    `json:"practiceSessionId,omitempty"`
-	SessionTitle     string    `json:"practiceSessionTitle,omitempty"`
-	BlockID          string    `json:"practiceBlockId,omitempty"`
-	BlockDate        string    `json:"practiceDate,omitempty"`
-	BlockKey         string    `json:"practiceBlockKey,omitempty"`
-	BlockTitle       string    `json:"practiceBlockTitle,omitempty"`
-	BlockCategory    string    `json:"practiceBlockCategory,omitempty"`
-	BlockTrack       string    `json:"practiceBlockTrack,omitempty"`
-	ObjectName       string    `json:"-"`
-	MediaKind        string    `json:"mediaKind"`
-	VideoContentType string    `json:"videoContentType,omitempty"`
-	VideoCodec       string    `json:"videoCodec,omitempty"`
-	VideoSizeBytes   int64     `json:"videoSizeBytes,omitempty"`
-	VideoWidth       int       `json:"videoWidth,omitempty"`
-	VideoHeight      int       `json:"videoHeight,omitempty"`
-	VideoFrameRate   float64   `json:"videoFrameRate,omitempty"`
-	VideoObjectName  string    `json:"-"`
-	WaveformPeaks    []float64 `json:"waveformPeaks,omitempty"`
+	ID                     uuid.UUID `json:"id"`
+	ContentType            string    `json:"contentType"`
+	Codec                  string    `json:"codec,omitempty"`
+	SizeBytes              int64     `json:"sizeBytes,omitempty"`
+	DurationMS             int       `json:"durationMs,omitempty"`
+	SampleRate             int       `json:"sampleRate,omitempty"`
+	Channels               int       `json:"channels,omitempty"`
+	RecordedAt             time.Time `json:"recordedAt"`
+	Status                 string    `json:"status"`
+	TuneID                 string    `json:"tuneId,omitempty"`
+	MissionID              string    `json:"missionId,omitempty"`
+	SkillIDs               []string  `json:"skillIds"`
+	TakeNumber             int       `json:"takeNumber,omitempty"`
+	Notes                  string    `json:"notes,omitempty"`
+	SessionID              string    `json:"practiceSessionId,omitempty"`
+	SessionTitle           string    `json:"practiceSessionTitle,omitempty"`
+	BlockID                string    `json:"practiceBlockId,omitempty"`
+	BlockDate              string    `json:"practiceDate,omitempty"`
+	BlockKey               string    `json:"practiceBlockKey,omitempty"`
+	BlockTitle             string    `json:"practiceBlockTitle,omitempty"`
+	BlockCategory          string    `json:"practiceBlockCategory,omitempty"`
+	BlockTrack             string    `json:"practiceBlockTrack,omitempty"`
+	ObjectName             string    `json:"-"`
+	MediaKind              string    `json:"mediaKind"`
+	VideoContentType       string    `json:"videoContentType,omitempty"`
+	VideoCodec             string    `json:"videoCodec,omitempty"`
+	VideoSizeBytes         int64     `json:"videoSizeBytes,omitempty"`
+	VideoWidth             int       `json:"videoWidth,omitempty"`
+	VideoHeight            int       `json:"videoHeight,omitempty"`
+	VideoFrameRate         float64   `json:"videoFrameRate,omitempty"`
+	VideoObjectName        string    `json:"-"`
+	VideoPlaybackOptimized bool      `json:"videoPlaybackOptimized,omitempty"`
+	WaveformPeaks          []float64 `json:"waveformPeaks,omitempty"`
 }
 
 func main() {
@@ -222,8 +223,11 @@ func main() {
 		Handler:           app.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       90 * time.Second,
+		// Clip Studio renders stream a bounded ten-minute movie through FFmpeg.
+		// Cloud Run owns the request deadline; a server-level write deadline would
+		// terminate valid renders before their signed download response is sent.
+		WriteTimeout: 0,
+		IdleTimeout:  90 * time.Second,
 	}
 	slog.Info("jazz API listening", "port", cfg.Port)
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
@@ -297,6 +301,7 @@ func (app *application) routes() http.Handler {
 	mux.Handle("GET /v1/studio/days/{date}", app.authenticate(http.HandlerFunc(app.clipStudioDay)))
 	mux.Handle("POST /v1/studio/days/{date}/scan", app.authenticate(http.HandlerFunc(app.scanClipStudioDay)))
 	mux.Handle("PATCH /v1/studio/candidates/{id}", app.authenticate(http.HandlerFunc(app.updateClipCandidate)))
+	mux.Handle("POST /v1/studio/renders", app.authenticate(http.HandlerFunc(app.renderClipStudioMovie)))
 	mux.Handle("POST /v1/guide-tone-drills", app.authenticate(http.HandlerFunc(app.createGuideToneDrill)))
 	mux.Handle("PATCH /v1/guide-tone-drills/{id}", app.authenticate(http.HandlerFunc(app.updateGuideToneDrill)))
 	mux.Handle("POST /v1/guide-tone-drills/{id}/attempts", app.authenticate(http.HandlerFunc(app.createGuideToneAttempt)))

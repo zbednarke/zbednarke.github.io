@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
 
 func TestScanWaveformForClipsFindsAndRanksActivity(t *testing.T) {
 	peaks := make([]float64, 120)
@@ -28,5 +32,19 @@ func TestScanWaveformForClipsRejectsShortOrEmptyAudio(t *testing.T) {
 	}
 	if got := scanWaveformForClips(make([]float64, 100), 60000); len(got) != 0 {
 		t.Fatalf("expected no silent clips, got %d", len(got))
+	}
+}
+
+func TestClipRecordingFingerprintTracksIdentityNotOrder(t *testing.T) {
+	first := recordingRow{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}
+	second := recordingRow{ID: uuid.MustParse("22222222-2222-2222-2222-222222222222")}
+	replacement := recordingRow{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333")}
+
+	want := clipRecordingFingerprint([]recordingRow{first, second})
+	if got := clipRecordingFingerprint([]recordingRow{second, first}); got != want {
+		t.Fatal("recording fingerprint changed when only the order changed")
+	}
+	if got := clipRecordingFingerprint([]recordingRow{first, replacement}); got == want {
+		t.Fatal("recording fingerprint did not change for an equal-count replacement")
 	}
 }

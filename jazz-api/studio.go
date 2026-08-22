@@ -1,15 +1,20 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+const clipAnalysisVersion = "waveform-v1"
 
 type clipCandidateRow struct {
 	ID              uuid.UUID       `json:"id"`
@@ -47,7 +52,22 @@ func (app *application) clipStudioDay(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"date": date, "recordings": recordings, "candidates": candidates})
+	var analysisVersion string
+	var analyzedAt time.Time
+	var analyzedRecordingCount int
+	var analyzedRecordingFingerprint string
+	analysisErr := app.db.QueryRow(r.Context(), `SELECT analysis_version,analyzed_at,recording_count,recording_fingerprint FROM clip_day_analyses WHERE user_id=$1 AND practice_date=$2::date`, userID, date).Scan(&analysisVersion, &analyzedAt, &analyzedRecordingCount, &analyzedRecordingFingerprint)
+	if analysisErr != nil && !errors.Is(analysisErr, pgx.ErrNoRows) {
+		app.serverError(w, analysisErr)
+		return
+	}
+	recordingFingerprint := clipRecordingFingerprint(recordings)
+	needsScan := errors.Is(analysisErr, pgx.ErrNoRows) || analysisVersion != clipAnalysisVersion || analyzedRecordingCount != len(recordings) || analyzedRecordingFingerprint != recordingFingerprint
+	analysis := map[string]any{"version": clipAnalysisVersion, "needsScan": needsScan, "recordingCount": len(recordings)}
+	if !analyzedAt.IsZero() {
+		analysis["analyzedAt"] = analyzedAt
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"date": date, "recordings": recordings, "candidates": candidates, "analysis": analysis})
 }
 
 func (app *application) clipStudioRecordings(r *http.Request, userID uuid.UUID, date string) ([]recordingRow, error) {
@@ -58,7 +78,7 @@ func (app *application) clipStudioRecordings(r *http.Request, userID uuid.UUID, 
 		COALESCE(r.practice_session_id,''),COALESCE(ps.title,''),COALESCE(r.practice_block_id::text,''),
 		COALESCE(pb.practice_date::text,''),COALESCE(pb.block_key,''),COALESCE(pb.title,''),COALESCE(pb.category,''),COALESCE(pb.track,''),r.object_name,
 		COALESCE(r.media_kind,'audio'),COALESCE(r.video_content_type,''),COALESCE(r.video_codec,''),COALESCE(r.video_size_bytes,r.video_expected_size_bytes,0),
-		COALESCE(r.video_width,0),COALESCE(r.video_height,0),COALESCE(r.video_frame_rate,0),COALESCE(r.video_object_name,''),r.waveform_peaks
+		COALESCE(r.video_width,0),COALESCE(r.video_height,0),COALESCE(r.video_frame_rate,0),COALESCE(r.video_object_name,''),COALESCE(r.video_playback_optimized,false),r.waveform_peaks
 		FROM recordings r
 		LEFT JOIN practice_sessions ps ON ps.id::text=r.practice_session_id AND ps.user_id=r.user_id
 		LEFT JOIN practice_blocks pb ON pb.id=r.practice_block_id AND pb.user_id=r.user_id
@@ -75,7 +95,7 @@ func (app *application) clipStudioRecordings(r *http.Request, userID uuid.UUID, 
 		var skills, waveform []byte
 		if err := rows.Scan(&item.ID, &item.ContentType, &item.Codec, &item.SizeBytes, &item.DurationMS, &item.SampleRate, &item.Channels, &item.RecordedAt, &item.Status,
 			&item.TuneID, &item.MissionID, &skills, &item.TakeNumber, &item.Notes, &item.SessionID, &item.SessionTitle, &item.BlockID, &item.BlockDate, &item.BlockKey, &item.BlockTitle, &item.BlockCategory, &item.BlockTrack, &item.ObjectName,
-			&item.MediaKind, &item.VideoContentType, &item.VideoCodec, &item.VideoSizeBytes, &item.VideoWidth, &item.VideoHeight, &item.VideoFrameRate, &item.VideoObjectName, &waveform); err != nil {
+			&item.MediaKind, &item.VideoContentType, &item.VideoCodec, &item.VideoSizeBytes, &item.VideoWidth, &item.VideoHeight, &item.VideoFrameRate, &item.VideoObjectName, &item.VideoPlaybackOptimized, &waveform); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(skills, &item.SkillIDs)
@@ -167,6 +187,15 @@ func (app *application) scanClipStudioDay(w http.ResponseWriter, r *http.Request
 		}
 		created += int(result.RowsAffected())
 	}
+	_, err = tx.Exec(r.Context(), `
+		INSERT INTO clip_day_analyses (user_id,practice_date,analysis_version,recording_count,recording_fingerprint,analyzed_at)
+		VALUES ($1,$2::date,$3,$4,$5,now())
+		ON CONFLICT (user_id,practice_date) DO UPDATE SET analysis_version=EXCLUDED.analysis_version,recording_count=EXCLUDED.recording_count,recording_fingerprint=EXCLUDED.recording_fingerprint,analyzed_at=now()`,
+		userID, date, clipAnalysisVersion, len(recordings), clipRecordingFingerprint(recordings))
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		app.serverError(w, err)
 		return
@@ -177,6 +206,16 @@ func (app *application) scanClipStudioDay(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"date": date, "scannedRecordings": len(recordings), "updatedCandidates": created, "candidates": candidates})
+}
+
+func clipRecordingFingerprint(recordings []recordingRow) string {
+	ids := make([]string, 0, len(recordings))
+	for _, recording := range recordings {
+		ids = append(ids, recording.ID.String())
+	}
+	sort.Strings(ids)
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
+	return fmt.Sprintf("%x", sum)
 }
 
 type clipCandidateUpdate struct {
