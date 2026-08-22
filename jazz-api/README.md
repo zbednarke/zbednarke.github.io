@@ -28,9 +28,21 @@ Runtime configuration:
 - `GCS_BUCKET`
 - `GCP_SERVICE_ACCOUNT`
 - `PUBLIC_SHARE_BASE_URL` (defaults to `https://zachbednarke.com/jazz/share`)
+- `FFMPEG_PATH` (defaults to `ffmpeg`; the production image includes it)
 - `PORT` (defaults to `8080`)
 
 `JAZZ_ALLOW_INSECURE_LOCAL=1` is available only for local development.
+
+## Clip Studio renders
+
+Clip Studio render requests are authenticated, limited to 24 clips and ten
+minutes, and stream directly from the private recording bucket through FFmpeg
+back into the bucket. The output is a 1080p H.264 MP4 with the separate WAV
+masters encoded as lossless 48 kHz ALAC audio. Render objects live under the
+`renders/` prefix and receive a GCS custom timestamp. Apply
+`deploy/jazz-recordings-lifecycle.json` to the recordings bucket so those
+temporary outputs are removed after one day. Cloud Run must allow long requests
+for the synchronous MVP renderer; use a 60-minute request timeout.
 
 ## Legacy WebM seek repair
 

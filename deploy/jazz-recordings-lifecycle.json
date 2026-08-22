@@ -1,0 +1,15 @@
+{
+  "rule": [
+    {
+      "action": {
+        "type": "Delete"
+      },
+      "condition": {
+        "daysSinceCustomTime": 1,
+        "matchesPrefix": [
+          "renders/"
+        ]
+      }
+    }
+  ]
+}

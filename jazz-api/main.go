@@ -297,6 +297,7 @@ func (app *application) routes() http.Handler {
 	mux.Handle("GET /v1/studio/days/{date}", app.authenticate(http.HandlerFunc(app.clipStudioDay)))
 	mux.Handle("POST /v1/studio/days/{date}/scan", app.authenticate(http.HandlerFunc(app.scanClipStudioDay)))
 	mux.Handle("PATCH /v1/studio/candidates/{id}", app.authenticate(http.HandlerFunc(app.updateClipCandidate)))
+	mux.Handle("POST /v1/studio/renders", app.authenticate(http.HandlerFunc(app.renderClipStudioMovie)))
 	mux.Handle("POST /v1/guide-tone-drills", app.authenticate(http.HandlerFunc(app.createGuideToneDrill)))
 	mux.Handle("PATCH /v1/guide-tone-drills/{id}", app.authenticate(http.HandlerFunc(app.updateGuideToneDrill)))
 	mux.Handle("POST /v1/guide-tone-drills/{id}/attempts", app.authenticate(http.HandlerFunc(app.createGuideToneAttempt)))

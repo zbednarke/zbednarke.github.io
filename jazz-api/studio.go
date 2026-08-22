@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const clipAnalysisVersion = "waveform-v1"
+
 type clipCandidateRow struct {
 	ID              uuid.UUID       `json:"id"`
 	RecordingID     uuid.UUID       `json:"recordingId"`
@@ -47,7 +49,20 @@ func (app *application) clipStudioDay(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"date": date, "recordings": recordings, "candidates": candidates})
+	var analysisVersion string
+	var analyzedAt time.Time
+	var analyzedRecordingCount int
+	analysisErr := app.db.QueryRow(r.Context(), `SELECT analysis_version,analyzed_at,recording_count FROM clip_day_analyses WHERE user_id=$1 AND practice_date=$2::date`, userID, date).Scan(&analysisVersion, &analyzedAt, &analyzedRecordingCount)
+	if analysisErr != nil && !errors.Is(analysisErr, pgx.ErrNoRows) {
+		app.serverError(w, analysisErr)
+		return
+	}
+	needsScan := errors.Is(analysisErr, pgx.ErrNoRows) || analysisVersion != clipAnalysisVersion || analyzedRecordingCount != len(recordings)
+	analysis := map[string]any{"version": clipAnalysisVersion, "needsScan": needsScan, "recordingCount": len(recordings)}
+	if !analyzedAt.IsZero() {
+		analysis["analyzedAt"] = analyzedAt
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"date": date, "recordings": recordings, "candidates": candidates, "analysis": analysis})
 }
 
 func (app *application) clipStudioRecordings(r *http.Request, userID uuid.UUID, date string) ([]recordingRow, error) {
@@ -166,6 +181,15 @@ func (app *application) scanClipStudioDay(w http.ResponseWriter, r *http.Request
 			return
 		}
 		created += int(result.RowsAffected())
+	}
+	_, err = tx.Exec(r.Context(), `
+		INSERT INTO clip_day_analyses (user_id,practice_date,analysis_version,recording_count,analyzed_at)
+		VALUES ($1,$2::date,$3,$4,now())
+		ON CONFLICT (user_id,practice_date) DO UPDATE SET analysis_version=EXCLUDED.analysis_version,recording_count=EXCLUDED.recording_count,analyzed_at=now()`,
+		userID, date, clipAnalysisVersion, len(recordings))
+	if err != nil {
+		app.serverError(w, err)
+		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		app.serverError(w, err)
