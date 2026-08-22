@@ -223,8 +223,11 @@ func main() {
 		Handler:           app.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       90 * time.Second,
+		// Clip Studio renders stream a bounded ten-minute movie through FFmpeg.
+		// Cloud Run owns the request deadline; a server-level write deadline would
+		// terminate valid renders before their signed download response is sent.
+		WriteTimeout: 0,
+		IdleTimeout:  90 * time.Second,
 	}
 	slog.Info("jazz API listening", "port", cfg.Port)
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {

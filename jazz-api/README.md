@@ -42,7 +42,14 @@ masters encoded as lossless 48 kHz ALAC audio. Render objects live under the
 `renders/` prefix and receive a GCS custom timestamp. Apply
 `deploy/jazz-recordings-lifecycle.json` to the recordings bucket so those
 temporary outputs are removed after one day. Cloud Run must allow long requests
-for the synchronous MVP renderer; use a 60-minute request timeout.
+for the synchronous MVP renderer. Deploy it with a 60-minute request timeout,
+2 vCPU, 2 GiB memory, concurrency 1, and at least two instances so an encode
+cannot starve ordinary API traffic:
+
+```sh
+gcloud run deploy jazz-api --source . --region us-central1 \
+  --timeout 3600 --cpu 2 --memory 2Gi --concurrency 1 --max-instances 3
+```
 
 ## Playback optimization
 

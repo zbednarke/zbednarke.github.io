@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS clip_day_analyses (
     practice_date DATE NOT NULL,
     analysis_version TEXT NOT NULL,
     recording_count INTEGER NOT NULL DEFAULT 0 CHECK (recording_count >= 0),
+    recording_fingerprint TEXT NOT NULL DEFAULT '',
     analyzed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, practice_date)
 );

@@ -434,6 +434,7 @@
     const request = ++state.playbackRequest;
     const key = playbackKey(recording);
     const warm = state.players.get(key);
+    state.media?.pause();
     if (!warm) {
       $("#studio-media").innerHTML = '<p class="clip-studio-empty">Loading private playback…</p>';
       setBufferStatus("Preparing media…");
@@ -441,7 +442,6 @@
     try {
       const entry = await cachedPlayer(recording, "auto");
       if (request !== state.playbackRequest || state.currentRecording?.id !== recording.id) return;
-      state.media?.pause();
       state.media = entry.media;
       $("#studio-media").replaceChildren(entry.media);
       seekPaused(entry.media, startMS);
@@ -555,10 +555,15 @@
   }
 
   function scheduleNoteSave() {
-    if (!state.current) return;
-    const key = `note:${state.current.id}`;
+    const candidate = state.current;
+    if (!candidate) return;
+    const notes = $("#studio-candidate-notes").value.trim();
+    const key = `note:${candidate.id}`;
     clearTimeout(state.saveTimers.get(key));
-    state.saveTimers.set(key, setTimeout(saveNoteNow, 700));
+    state.saveTimers.set(key, setTimeout(() => {
+      state.saveTimers.delete(key);
+      patchCandidate(candidate, { notes }, "Editor note synced", false);
+    }, 700));
   }
 
   function saveNoteNow() {
