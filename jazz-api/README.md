@@ -44,13 +44,15 @@ masters encoded as lossless 48 kHz ALAC audio. Render objects live under the
 temporary outputs are removed after one day. Cloud Run must allow long requests
 for the synchronous MVP renderer; use a 60-minute request timeout.
 
-## Legacy WebM seek repair
+## Playback optimization
 
-Browser recordings created with the old one-second MediaRecorder timeslice do
-not contain a duration or cue index. `cmd/repair-video-index` losslessly remuxes
-those objects, keeps each original beside it as
-`video.original-unindexed.webm`, verifies the packet-preserving output, and
-refreshes the recording's GCS metadata in Postgres. It is dry-run by default:
+Browser-created WebM and fragmented MP4 recordings can require long scans before
+their duration and seek index are usable. `cmd/repair-video-index` losslessly
+remuxes those objects, moves MP4 metadata to the front, writes WebM cues, applies
+a ten-minute private browser-cache policy, and keeps each original beside the
+optimized file as `video.original-unindexed.*`. It verifies that the codecs and
+size remain packet-preserving and refreshes GCS metadata in Postgres. It is
+dry-run by default:
 
 ```sh
 go run ./cmd/repair-video-index -all
@@ -58,5 +60,6 @@ go run ./cmd/repair-video-index -id RECORDING_UUID -apply
 ```
 
 `Dockerfile.repair` and `cloudbuild.repair.yaml` package the same command for
-the `jazz-video-index-repair` Cloud Run job so large archives can be repaired
-inside the bucket's region.
+the `jazz-video-index-repair` Cloud Run job so large recordings can be repaired
+inside the bucket's region. Run the job periodically with `-all -apply`; it
+selects only recordings whose `video_playback_optimized` flag is false.

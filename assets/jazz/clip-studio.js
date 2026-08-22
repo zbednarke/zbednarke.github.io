@@ -3,6 +3,8 @@
 
   const API_BASE = "./api/v1";
   const STORAGE_PREFIX = "jazz.clip-studio.output.v1";
+  const PLAYER_CACHE_LIMIT = 2;
+  const PLAYBACK_EXPIRY_MARGIN_MS = 30 * 1000;
   const U = globalThis.JazzArchiveUtils;
   const Model = globalThis.JazzClipStudioModel;
   if (!U || !Model) return;
@@ -11,6 +13,7 @@
     date: U.dateKey(new Date()), initialized: false, recordings: [], candidates: [], analysis: null,
     current: null, currentRecording: null, currentMode: "idle", media: null,
     loadRequest: 0, playbackRequest: 0, savePromise: Promise.resolve(), saveTimers: new Map(),
+    playbackURLs: new Map(), players: new Map(), playerLoads: new Map(), playerUse: 0, warmToken: 0,
     project: Model.createProject(U.dateKey(new Date())), draggedOutputIndex: -1,
   };
 
@@ -114,6 +117,7 @@
   async function loadDay(date) {
     if (!U.parseDateKey(date)) return;
     const request = ++state.loadRequest;
+    state.warmToken++;
     if (state.date !== date) persistProject();
     state.date = date;
     loadProject();
@@ -135,6 +139,7 @@
       } else if (state.recordings.length) {
         setScanState("complete", "Scan complete", scanDetail());
         setStatus("Analysis active", "success");
+        warmDayMedia();
       } else {
         setScanState("idle", "Nothing to scan", "No completed recordings on this day.");
         setStatus("No completed recordings");
@@ -181,6 +186,7 @@
       setScanState("complete", "Scan complete", scanDetail());
       setStatus("Analysis active", "success");
       $("#studio-scan-menu").open = false;
+      warmDayMedia();
     } catch (error) {
       if (state.date !== scanDate) return;
       setScanState("error", "Scan failed", error.message);
@@ -208,7 +214,7 @@
     host.innerHTML = state.recordings.map((recording) => recordingMarkup(recording)).join("");
     host.querySelectorAll("[data-studio-candidate]").forEach((button) => button.addEventListener("click", (event) => {
       event.stopPropagation();
-      selectCandidate(button.dataset.studioCandidate, true);
+      selectCandidate(button.dataset.studioCandidate);
     }));
     host.querySelectorAll("[data-boundary-candidate]").forEach((handle) => handle.addEventListener("pointerdown", (event) => beginBoundaryDrag(event, handle)));
     host.querySelectorAll(".clip-studio-waveform").forEach((waveform) => waveform.addEventListener("click", (event) => {
@@ -250,10 +256,10 @@
       const label = candidate.reviewStatus === "rejected" ? "Rejected" : `Suggestion ${index + 1}`;
       return `<article class="clip-candidate ${candidate.reviewStatus}${state.current?.id === candidate.id ? " active" : ""}"><button class="clip-candidate-open" type="button" data-open-candidate="${candidate.id}"><span>${label}</span><strong>${escapeHTML(titleFor(recording))} · ${escapeHTML(U.takeLabel(recording))}</strong><time>${formatClock(candidate.startMs)} — ${formatClock(candidate.endMs)}</time><em>${Math.round(Number(candidate.score || 0) * 100)}% activity confidence</em></button><div class="clip-candidate-reasons">${reasons.map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div></article>`;
     }).join("");
-    host.querySelectorAll("[data-open-candidate]").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.openCandidate, true)));
+    host.querySelectorAll("[data-open-candidate]").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.openCandidate)));
   }
 
-  async function selectCandidate(id, autoplay) {
+  async function selectCandidate(id) {
     const candidate = state.candidates.find((item) => item.id === id);
     const recording = recordingFor(candidate);
     if (!candidate || !recording) return;
@@ -269,7 +275,7 @@
     $("#studio-candidate-notes").value = candidate.notes || "";
     $("#studio-editor").hidden = false;
     $("#studio-raw-notice").hidden = true;
-    await loadPlayer(recording, candidate.startMs, autoplay);
+    await loadPlayer(recording, candidate.startMs);
   }
 
   async function browseRecording(recording, startMS) {
@@ -284,7 +290,7 @@
     const notice = $("#studio-raw-notice");
     notice.textContent = "Browsing raw recording · playback continues until you pause it.";
     notice.hidden = false;
-    await loadPlayer(recording, startMS, true);
+    await loadPlayer(recording, startMS);
   }
 
   async function previewOutputClip(clip) {
@@ -304,33 +310,166 @@
     const notice = $("#studio-raw-notice");
     notice.textContent = "Output clip preview · this is the copied cut currently in the render timeline.";
     notice.hidden = false;
-    await loadPlayer(recording, clip.startMs, true);
+    await loadPlayer(recording, clip.startMs);
   }
 
-  async function loadPlayer(recording, startMS, autoplay) {
-    const request = ++state.playbackRequest;
-    $("#studio-media").innerHTML = '<p class="clip-studio-empty">Loading private playback…</p>';
+  function playbackKey(recording) {
+    return `${recording.id}:${recording.mediaKind === "video" ? "video" : "audio"}`;
+  }
+
+  function playbackFresh(entry) {
+    return entry && entry.expiresAt > Date.now() + PLAYBACK_EXPIRY_MARGIN_MS;
+  }
+
+  async function playbackSource(recording) {
+    const key = playbackKey(recording);
+    const cached = state.playbackURLs.get(key);
+    if (playbackFresh(cached)) return cached;
+    if (cached?.promise) return cached.promise;
+    const asset = recording.mediaKind === "video" ? "video" : "audio";
+    const promise = api(`/recordings/${recording.id}/playback-url?asset=${asset}`, { method: "POST", body: "{}" }).then((result) => {
+      const entry = { url: result.url, expiresAt: Date.parse(result.expiresAt) || Date.now() + 9 * 60 * 1000 };
+      state.playbackURLs.set(key, entry);
+      return entry;
+    }).catch((error) => {
+      state.playbackURLs.delete(key);
+      throw error;
+    });
+    state.playbackURLs.set(key, { promise, expiresAt: 0 });
+    return promise;
+  }
+
+  function setBufferStatus(message = "") {
+    const status = $("#studio-buffer-status");
+    if (!status) return;
+    status.textContent = message;
+    status.hidden = !message;
+  }
+
+  function bindPlayer(media, recording) {
+    media.controls = true;
+    media.preload = "metadata";
+    media.playsInline = true;
+    media.dataset.recordingId = recording.id;
+    ["timeupdate", "seeking", "seeked", "play", "pause", "progress"].forEach((event) => media.addEventListener(event, updatePlayhead));
+    ["waiting", "stalled", "loadstart"].forEach((event) => media.addEventListener(event, () => {
+      if (state.media === media) setBufferStatus(event === "stalled" ? "Network stalled" : "Buffering…");
+    }));
+    ["canplay", "canplaythrough", "playing", "seeked", "loadeddata"].forEach((event) => media.addEventListener(event, () => {
+      if (state.media === media) setBufferStatus("");
+    }));
+    media.addEventListener("error", () => {
+      if (state.media === media) setBufferStatus("Playback error");
+    });
+  }
+
+  function releasePlayer(key) {
+    const entry = state.players.get(key);
+    if (!entry) return;
+    entry.media.pause();
+    entry.media.removeAttribute("src");
+    entry.media.load();
+    state.players.delete(key);
+  }
+
+  function trimPlayerCache(activeKey) {
+    while (state.players.size > PLAYER_CACHE_LIMIT) {
+      const oldest = [...state.players.entries()]
+        .filter(([key, entry]) => key !== activeKey && entry.media !== state.media)
+        .sort((left, right) => left[1].lastUsed - right[1].lastUsed)[0];
+      if (!oldest) return;
+      releasePlayer(oldest[0]);
+    }
+  }
+
+  async function cachedPlayer(recording, preload = "auto") {
+    const key = playbackKey(recording);
+    const existing = state.players.get(key);
+    if (existing && playbackFresh(existing)) {
+      existing.lastUsed = ++state.playerUse;
+      existing.media.preload = preload;
+      return existing;
+    }
+    if (existing) releasePlayer(key);
+    if (state.playerLoads.has(key)) {
+      const loading = await state.playerLoads.get(key);
+      loading.lastUsed = ++state.playerUse;
+      loading.media.preload = preload;
+      return loading;
+    }
+    const load = (async () => {
+      const source = await playbackSource(recording);
+      const ready = state.players.get(key);
+      if (ready && playbackFresh(ready)) return ready;
+      const media = document.createElement(recording.mediaKind === "video" ? "video" : "audio");
+      bindPlayer(media, recording);
+      media.preload = preload;
+      media.src = source.url;
+      media.load();
+      const entry = { media, expiresAt: source.expiresAt, lastUsed: ++state.playerUse };
+      state.players.set(key, entry);
+      trimPlayerCache(key);
+      return entry;
+    })();
+    state.playerLoads.set(key, load);
     try {
-      const asset = recording.mediaKind === "video" ? "video" : "audio";
-      const result = await api(`/recordings/${recording.id}/playback-url?asset=${asset}`, { method: "POST", body: "{}" });
+      return await load;
+    } finally {
+      if (state.playerLoads.get(key) === load) state.playerLoads.delete(key);
+    }
+  }
+
+  function seekPaused(media, startMS) {
+    media.pause();
+    const seek = () => {
+      const duration = Number.isFinite(media.duration) ? media.duration : Infinity;
+      media.currentTime = Math.max(0, Math.min(duration, Number(startMS || 0) / 1000));
+      updatePlayhead();
+    };
+    if (media.readyState >= 1) seek();
+    else media.addEventListener("loadedmetadata", seek, { once: true });
+  }
+
+  async function loadPlayer(recording, startMS) {
+    const request = ++state.playbackRequest;
+    const key = playbackKey(recording);
+    const warm = state.players.get(key);
+    if (!warm) {
+      $("#studio-media").innerHTML = '<p class="clip-studio-empty">Loading private playback…</p>';
+      setBufferStatus("Preparing media…");
+    }
+    try {
+      const entry = await cachedPlayer(recording, "auto");
       if (request !== state.playbackRequest || state.currentRecording?.id !== recording.id) return;
       state.media?.pause();
-      const media = document.createElement(asset === "video" ? "video" : "audio");
-      media.controls = true;
-      media.preload = "metadata";
-      media.playsInline = true;
-      media.src = result.url;
-      media.addEventListener("loadedmetadata", () => {
-        media.currentTime = Math.max(0, Math.min(Number(media.duration || Infinity), Number(startMS || 0) / 1000));
-        if (autoplay) media.play().catch(() => {});
-        updatePlayhead();
-      }, { once: true });
-      ["timeupdate", "seeking", "seeked", "play", "pause"].forEach((event) => media.addEventListener(event, updatePlayhead));
-      $("#studio-media").replaceChildren(media);
-      state.media = media;
+      state.media = entry.media;
+      $("#studio-media").replaceChildren(entry.media);
+      seekPaused(entry.media, startMS);
+      setBufferStatus(entry.media.readyState >= 2 ? "" : "Buffering…");
     } catch (error) {
+      if (request !== state.playbackRequest) return;
       $("#studio-media").innerHTML = `<p class="clip-studio-empty">Playback unavailable · ${escapeHTML(error.message)}</p>`;
+      setBufferStatus("");
     }
+  }
+
+  function warmDayMedia() {
+    const token = ++state.warmToken;
+    const ordered = [];
+    const seen = new Set();
+    [...state.candidates.map(recordingFor), ...state.recordings].forEach((recording) => {
+      if (!recording || seen.has(recording.id)) return;
+      seen.add(recording.id);
+      ordered.push(recording);
+    });
+    ordered.slice(0, 4).forEach((recording) => playbackSource(recording).catch(() => {}));
+    ordered.filter((recording) => recording.videoPlaybackOptimized).slice(0, PLAYER_CACHE_LIMIT).forEach(async (recording) => {
+      try {
+        await playbackSource(recording);
+        if (token !== state.warmToken) return;
+        await cachedPlayer(recording, "metadata");
+      } catch {}
+    });
   }
 
   function updatePlayhead() {
@@ -351,7 +490,7 @@
     if (!candidate || !recording || !waveform || !region) return;
     event.preventDefault();
     event.stopPropagation();
-    selectCandidate(candidate.id, false);
+    selectCandidate(candidate.id);
     handle.setPointerCapture?.(event.pointerId);
     handle.classList.add("dragging");
     const edge = handle.dataset.boundaryEdge;
@@ -597,6 +736,7 @@
     $("#studio-media").innerHTML = '<p class="clip-studio-empty">Choose a suggested region, or click anywhere in a waveform to browse a complete take.</p>';
     $("#studio-editor").hidden = true;
     $("#studio-raw-notice").hidden = true;
+    setBufferStatus("");
     updatePlayhead();
   }
 

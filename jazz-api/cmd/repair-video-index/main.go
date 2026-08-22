@@ -42,7 +42,7 @@ func main() {
 	var ffmpegPath string
 	var userSubject string
 	flag.StringVar(&recordingID, "id", "", "repair one recording UUID")
-	flag.BoolVar(&all, "all", false, "repair every unindexed ready WebM video")
+	flag.BoolVar(&all, "all", false, "repair every unoptimized ready video")
 	flag.BoolVar(&apply, "apply", os.Getenv("APPLY") == "1", "write backups and repaired playback objects")
 	flag.StringVar(&ffmpegPath, "ffmpeg", "ffmpeg", "path to ffmpeg")
 	flag.StringVar(&userSubject, "user", "zach", "app user auth subject")
@@ -91,7 +91,7 @@ func main() {
 	for _, item := range recordings {
 		total += item.StoredSize
 	}
-	log.Printf("found %d ready WebM video(s), %.2f GiB total", len(recordings), float64(total)/(1<<30))
+	log.Printf("found %d unoptimized ready video(s), %.2f GiB total", len(recordings), float64(total)/(1<<30))
 	if !apply {
 		log.Print("dry run only; pass -apply to create permanent backups and repair playback objects")
 		return
@@ -168,7 +168,7 @@ func loadRecordings(ctx context.Context, db *pgxpool.Pool, userSubject, recordin
 		       COALESCE(r.video_size_bytes,r.video_expected_size_bytes,0),COALESCE(r.video_object_generation,0),r.recorded_at
 		FROM recordings r JOIN app_users u ON u.id=r.user_id
 		WHERE u.auth_subject=$1 AND r.media_kind='video' AND r.status='ready' AND r.video_object_name IS NOT NULL
-		  AND COALESCE(r.video_content_type,'') LIKE 'video/webm%'`
+		  AND NOT COALESCE(r.video_playback_optimized,false)`
 	args := []any{userSubject}
 	if recordingID != "" {
 		id, err := uuid.Parse(recordingID)
@@ -202,8 +202,12 @@ func repair(ctx context.Context, db *pgxpool.Pool, client *storage.Client, ffmpe
 		return fmt.Errorf("read source metadata: %w", err)
 	}
 	if attrs.Metadata["seekablePlayback"] == "true" {
-		log.Print("already marked seekable; refreshing database metadata")
-		return updateDatabase(ctx, db, item, attrs)
+		log.Print("already marked seekable; refreshing cache and database metadata")
+		updated, updateErr := ensurePlaybackCache(ctx, object, attrs)
+		if updateErr != nil {
+			return updateErr
+		}
+		return updateDatabase(ctx, db, item, updated)
 	}
 
 	tempDir, err := os.MkdirTemp("", "jazz-video-index-")
@@ -211,20 +215,30 @@ func repair(ctx context.Context, db *pgxpool.Pool, client *storage.Client, ffmpe
 		return err
 	}
 	defer os.RemoveAll(tempDir)
-	inputPath := filepath.Join(tempDir, "input.webm")
-	outputPath := filepath.Join(tempDir, "seekable.webm")
+	extension := path.Ext(item.ObjectName)
+	if extension == "" {
+		extension = ".video"
+	}
+	inputPath := filepath.Join(tempDir, "input"+extension)
+	outputPath := filepath.Join(tempDir, "seekable"+extension)
 	if err := download(ctx, object, inputPath); err != nil {
 		return fmt.Errorf("download source: %w", err)
 	}
-	if duration, ok := probeDuration(inputPath); ok {
-		log.Printf("source is already seekable (%.3fs); preserving bytes", duration)
-		metadata := cloneMetadata(attrs.Metadata)
-		metadata["seekablePlayback"] = "true"
-		updated, err := object.If(storage.Conditions{MetagenerationMatch: attrs.Metageneration}).Update(ctx, storage.ObjectAttrsToUpdate{Metadata: metadata})
-		if err != nil {
-			return fmt.Errorf("mark seekable source: %w", err)
+	sourceCodecs, codecsOK := probeCodecs(inputPath)
+	if !codecsOK {
+		return errors.New("could not identify source video codecs")
+	}
+	if isWebM(item.ContentType) {
+		if duration, ok := probeDuration(inputPath); ok {
+			log.Printf("source is already seekable (%.3fs); preserving bytes", duration)
+			metadata := cloneMetadata(attrs.Metadata)
+			metadata["seekablePlayback"] = "true"
+			updated, err := object.If(storage.Conditions{MetagenerationMatch: attrs.Metageneration}).Update(ctx, storage.ObjectAttrsToUpdate{Metadata: metadata, CacheControl: playbackCacheControl})
+			if err != nil {
+				return fmt.Errorf("mark seekable source: %w", err)
+			}
+			return updateDatabase(ctx, db, item, updated)
 		}
-		return updateDatabase(ctx, db, item, updated)
 	}
 
 	backupName := backupObjectName(item.ObjectName)
@@ -245,15 +259,17 @@ func repair(ctx context.Context, db *pgxpool.Pool, client *storage.Client, ffmpe
 		log.Printf("original backup already exists at gs://%s/%s", item.Bucket, backupName)
 	}
 
-	command := exec.CommandContext(ctx, ffmpegPath,
-		"-hide_banner", "-loglevel", "error", "-y", "-i", inputPath,
-		"-map", "0", "-c", "copy", "-reserve_index_space", "1048576", "-cues_to_front", "1", outputPath)
+	command := exec.CommandContext(ctx, ffmpegPath, remuxArgs(item.ContentType, inputPath, outputPath)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("ffmpeg remux: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	duration, ok := probeDuration(outputPath)
 	if !ok {
 		return errors.New("repaired video still has no finite duration")
+	}
+	repairedCodecs, codecsOK := probeCodecs(outputPath)
+	if !codecsOK || repairedCodecs != sourceCodecs {
+		return fmt.Errorf("repaired codecs %q do not match source codecs %q", repairedCodecs, sourceCodecs)
 	}
 	inputInfo, err := os.Stat(inputPath)
 	if err != nil {
@@ -276,6 +292,9 @@ func repair(ctx context.Context, db *pgxpool.Pool, client *storage.Client, ffmpe
 	metadata := cloneMetadata(attrs.Metadata)
 	metadata["seekablePlayback"] = "true"
 	metadata["originalGeneration"] = strconv.FormatInt(attrs.Generation, 10)
+	if isMP4(item.ContentType) {
+		metadata["fastStart"] = "true"
+	}
 	newAttrs, err := upload(ctx, object.If(storage.Conditions{GenerationMatch: attrs.Generation}), outputPath, attrs.ContentType, metadata)
 	if err != nil {
 		return fmt.Errorf("upload repaired object: %w", err)
@@ -313,6 +332,7 @@ func upload(ctx context.Context, object *storage.ObjectHandle, source, contentTy
 	defer file.Close()
 	writer := object.NewWriter(ctx)
 	writer.ContentType = contentType
+	writer.CacheControl = playbackCacheControl
 	writer.Metadata = metadata
 	writer.ChunkSize = 16 << 20
 	if _, err := io.Copy(writer, file); err != nil {
@@ -335,11 +355,18 @@ func probeDuration(filename string) (float64, bool) {
 	return duration, err == nil && duration > 0
 }
 
+func probeCodecs(filename string) (string, bool) {
+	command := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "csv=p=0", filename)
+	output, err := command.Output()
+	value := strings.TrimSpace(string(output))
+	return value, err == nil && value != ""
+}
+
 func updateDatabase(ctx context.Context, db *pgxpool.Pool, item recording, attrs *storage.ObjectAttrs) error {
 	checksum := fmt.Sprintf("crc32c:%08x", attrs.CRC32C)
 	result, err := db.Exec(ctx, `
 		UPDATE recordings
-		SET video_size_bytes=$1,video_object_generation=$2,video_checksum=$3,updated_at=now()
+		SET video_size_bytes=$1,video_object_generation=$2,video_checksum=$3,video_playback_optimized=true,updated_at=now()
 		WHERE id=$4 AND video_object_name=$5`, attrs.Size, attrs.Generation, checksum, item.ID, item.ObjectName)
 	if err != nil {
 		return fmt.Errorf("update database metadata: %w", err)
@@ -348,6 +375,35 @@ func updateDatabase(ctx context.Context, db *pgxpool.Pool, item recording, attrs
 		return errors.New("recording changed before database metadata update")
 	}
 	return nil
+}
+
+const playbackCacheControl = "private, max-age=600"
+
+func isMP4(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(contentType), "video/mp4")
+}
+
+func isWebM(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(contentType), "video/webm")
+}
+
+func remuxArgs(contentType, inputPath, outputPath string) []string {
+	args := []string{"-hide_banner", "-loglevel", "error", "-y", "-i", inputPath, "-map", "0", "-c", "copy"}
+	if isMP4(contentType) {
+		return append(args, "-movflags", "+faststart", outputPath)
+	}
+	return append(args, "-reserve_index_space", "1048576", "-cues_to_front", "1", outputPath)
+}
+
+func ensurePlaybackCache(ctx context.Context, object *storage.ObjectHandle, attrs *storage.ObjectAttrs) (*storage.ObjectAttrs, error) {
+	if attrs.CacheControl == playbackCacheControl {
+		return attrs, nil
+	}
+	updated, err := object.If(storage.Conditions{MetagenerationMatch: attrs.Metageneration}).Update(ctx, storage.ObjectAttrsToUpdate{CacheControl: playbackCacheControl})
+	if err != nil {
+		return nil, fmt.Errorf("set playback cache metadata: %w", err)
+	}
+	return updated, nil
 }
 
 func backupObjectName(objectName string) string {
