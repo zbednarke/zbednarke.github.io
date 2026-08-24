@@ -32,3 +32,28 @@ test("output timeline enforces the ten minute render ceiling", () => {
   const project = model.addClip(model.createProject("2026-08-22"), clip("one", 0, model.MAX_DURATION_MS));
   assert.throws(() => model.addClip(project, clip("two")), /ten minutes/);
 });
+
+test("manual source clips default to ten seconds centered on the click", () => {
+  assert.deepEqual(model.placeDefaultSourceClip(30000, 60000, []), { startMs: 25000, endMs: 35000 });
+  assert.deepEqual(model.placeDefaultSourceClip(2000, 60000, []), { startMs: 0, endMs: 10000 });
+  assert.deepEqual(model.placeDefaultSourceClip(59000, 60000, []), { startMs: 50000, endMs: 60000 });
+});
+
+test("manual source clips push into the nearest open ten-second gap", () => {
+  const existing = [{ startMs: 10000, endMs: 20000, reviewStatus: "suggested" }];
+  assert.deepEqual(model.placeDefaultSourceClip(8000, 60000, existing), { startMs: 0, endMs: 10000 });
+  assert.deepEqual(model.placeDefaultSourceClip(22000, 60000, existing), { startMs: 20000, endMs: 30000 });
+});
+
+test("manual source clip clicks inside clips or on their boundaries are no-ops", () => {
+  const existing = [{ startMs: 10000, endMs: 20000, reviewStatus: "kept" }];
+  assert.equal(model.placeDefaultSourceClip(10000, 60000, existing), null);
+  assert.equal(model.placeDefaultSourceClip(15000, 60000, existing), null);
+  assert.equal(model.placeDefaultSourceClip(20000, 60000, existing), null);
+});
+
+test("manual source clip placement ignores rejected clips and returns null without enough room", () => {
+  assert.deepEqual(model.placeDefaultSourceClip(15000, 30000, [{ startMs: 10000, endMs: 20000, reviewStatus: "rejected" }]), { startMs: 10000, endMs: 20000 });
+  assert.equal(model.placeDefaultSourceClip(25000, 30000, [{ startMs: 0, endMs: 12000 }, { startMs: 18000, endMs: 30000 }]), null);
+  assert.equal(model.placeDefaultSourceClip(200, 400, []), null);
+});
