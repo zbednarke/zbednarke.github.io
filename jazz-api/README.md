@@ -37,8 +37,9 @@ Runtime configuration:
 
 Clip Studio render requests are authenticated, limited to 24 clips and ten
 minutes, and stream directly from the private recording bucket through FFmpeg
-back into the bucket. The output is a 1080p H.264 MP4 with the separate WAV
-masters encoded as lossless 48 kHz ALAC audio. Render objects live under the
+back into the bucket. The output is a 1080p H.264 MP4 with two audio tracks:
+default 320 kbps AAC for broadly compatible playback and the separate WAV
+masters encoded as a second lossless 48 kHz ALAC track. Render objects live under the
 `renders/` prefix and receive a GCS custom timestamp. Apply
 `deploy/jazz-recordings-lifecycle.json` to the recordings bucket so those
 temporary outputs are removed after one day. Cloud Run must allow long requests

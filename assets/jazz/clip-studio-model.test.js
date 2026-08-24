@@ -42,6 +42,13 @@ test("output timeline enforces the ten minute render ceiling", () => {
   assert.throws(() => model.addClip(project, clip("two")), /ten minutes/);
 });
 
+test("render estimates match measured production encoding time", () => {
+  const short = model.addClip(model.createProject("2026-08-23"), clip("short", 0, 10000));
+  assert.equal(model.estimatedRenderMS(short), 50000);
+  const firstRender = model.addClip(model.createProject("2026-08-23"), clip("first", 0, 165000));
+  assert.equal(model.estimatedRenderMS(firstRender), 515000);
+});
+
 test("manual source clips default to ten seconds centered on the click", () => {
   assert.deepEqual(model.placeDefaultSourceClip(30000, 60000, []), { startMs: 25000, endMs: 35000 });
   assert.deepEqual(model.placeDefaultSourceClip(2000, 60000, []), { startMs: 0, endMs: 10000 });

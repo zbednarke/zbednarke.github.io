@@ -1404,7 +1404,7 @@ footer p[data-tone="offline"] { color: var(--red); }
 @media(max-width:760px){.virtuoso-studio .virtuoso-nav{display:none}.virtuoso-studio .virtuoso-mobile-header{position:sticky;z-index:35;top:0;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(19,19,20,.96)}.virtuoso-studio main{margin-left:0}.clip-studio-screen{padding:28px 15px 48px}.clip-studio-header{display:block}.clip-studio-date-nav{margin-top:22px}.clip-studio-date-nav label{flex:1}.clip-studio-notice{grid-template-columns:1fr;gap:12px}.clip-studio-summary{grid-template-columns:repeat(2,1fr)}.clip-studio-summary p{grid-column:1/-1;justify-self:stretch;border-top:1px solid var(--line);text-align:left}.clip-studio-summary>div{padding-inline:10px}.clip-studio-workspace{display:block}.clip-studio-candidates,.clip-studio-preview{margin-top:16px}.clip-studio-boundaries{grid-template-columns:1fr 1fr}.clip-studio-boundaries button{grid-column:1/-1}}
 
 /* Clip Studio render timeline */
-.clip-studio-screen{padding-bottom:230px}
+.clip-studio-screen{padding-bottom:260px}
 .clip-studio-header-tools{display:flex;align-items:flex-end;gap:12px}
 .studio-scan-menu{position:relative;min-width:150px}
 .studio-scan-menu summary{min-height:48px;display:flex;align-items:center;gap:8px;padding:0 13px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;font:8px var(--mono);letter-spacing:.08em;text-transform:uppercase;list-style:none}
@@ -1476,7 +1476,7 @@ footer p[data-tone="offline"] { color: var(--red); }
 .studio-output-open span{color:var(--brass-light);font:7px var(--mono)}
 .studio-output-remove{align-self:start;width:23px;height:23px;border:0;background:transparent;color:var(--faint);cursor:pointer;font-size:16px}
 .studio-output-remove:hover{color:#d49a9a}
-.studio-render-controls{display:grid;grid-template-columns:minmax(130px,1fr) auto;grid-template-areas:"title render" "quality status";gap:7px 10px}
+.studio-render-controls{display:grid;grid-template-columns:minmax(130px,1fr) auto;grid-template-areas:"title render" "quality status" "progress progress";gap:7px 10px}
 .studio-render-controls>label{grid-area:title;display:grid;gap:4px}
 .studio-render-controls input{min-width:0;width:100%;height:32px;padding:0 9px;border:1px solid var(--line);background:#131314;color:#f3f3f2;font:9px var(--mono)}
 .studio-quality{grid-area:quality;position:relative;align-self:center;color:var(--green);font:7px var(--mono);text-transform:uppercase}
@@ -1487,6 +1487,7 @@ footer p[data-tone="offline"] { color: var(--red); }
 #studio-render:disabled{opacity:.42;cursor:not-allowed}
 #studio-render-status{grid-area:status;align-self:center;overflow:hidden;color:var(--faint);font:7px var(--mono);text-align:right;text-overflow:ellipsis;white-space:nowrap}
 #studio-render-status[data-tone=success]{color:var(--green)}#studio-render-status[data-tone=error]{color:#d49a9a}
+.studio-render-progress{grid-area:progress;display:grid;grid-template-columns:minmax(100px,1fr) auto;align-items:center;gap:9px}.studio-render-progress[hidden]{display:none}.studio-render-progress>div{height:4px;overflow:hidden;background:rgba(181,147,91,.14)}.studio-render-progress i{display:block;width:0;height:100%;background:var(--green);box-shadow:0 0 10px rgba(165,201,159,.32);transition:width 1s linear}.studio-render-progress span{color:var(--muted);font:7px var(--mono);white-space:nowrap}
 @media(max-width:1180px){.clip-studio-header{align-items:flex-start}.clip-studio-header-tools{flex-direction:column;align-items:stretch}.clip-studio-workspace{grid-template-columns:1fr;grid-template-areas:"timeline" "side"}.clip-studio-right-column{grid-template-columns:1fr 1fr}.studio-output-dock{left:218px;grid-template-columns:auto minmax(220px,1fr) minmax(285px,390px)}}
 @media(max-width:900px){.clip-studio-right-column{grid-template-columns:1fr}.studio-output-dock{grid-template-columns:auto minmax(190px,1fr) minmax(250px,330px)}.studio-output-heading{display:none}}
 @media(max-width:760px){.clip-studio-screen{padding-bottom:48px}.clip-studio-header-tools{margin-top:20px}.studio-scan-menu{order:2}.clip-studio-summary{grid-template-columns:repeat(2,1fr)}.clip-studio-summary-status{grid-column:1/-1;border-top:1px solid var(--line)}.clip-studio-summary-status strong{text-align:left}.studio-output-dock{display:none}.studio-clip-actions{grid-template-columns:1fr}.studio-add-output{display:none}.clip-studio-waveform{height:70px}.studio-clip-boundary{width:15px;min-width:15px!important}.studio-clip-boundary.left{left:-7px}.studio-clip-boundary.right{right:-7px}}

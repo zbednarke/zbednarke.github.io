@@ -134,7 +134,7 @@ func (app *application) renderClipStudioMovie(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": renderID, "filename": filename, "url": downloadURL, "expiresAt": downloadExpires,
 		"retainedUntil": time.Now().Add(24 * time.Hour), "durationMs": totalDuration,
-		"quality": map[string]any{"video": "1080p H.264, CRF 18", "audio": "Lossless ALAC, 48 kHz, original levels", "audioLossless": true},
+		"quality": map[string]any{"video": "1080p H.264, CRF 18", "audio": "AAC 320 kbps playback + lossless ALAC master, 48 kHz, original levels", "audioLossless": true},
 	})
 }
 
@@ -148,7 +148,7 @@ func (app *application) streamRenderedMovie(ctx context.Context, objectName stri
 	writer.CustomTime = time.Now().UTC()
 	writer.Metadata = map[string]string{
 		"renderId": renderID.String(), "temporary": "true", "deleteAfter": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
-		"audioQuality": "lossless-alac-48khz", "videoQuality": "h264-1080p-crf18",
+		"audioQuality": "aac-320k-default+lossless-alac-48khz", "videoQuality": "h264-1080p-crf18",
 	}
 	command.Stdout = writer
 	var stderr cappedBuffer
@@ -177,15 +177,20 @@ func buildFFmpegRenderArgs(sources []renderSource) []string {
 	concatInputs := strings.Builder{}
 	for index := range sources {
 		videoInput, audioInput := index*2, index*2+1
+		duration := formatFFmpegSeconds(sources[index].EndMS - sources[index].StartMS)
 		filters = append(filters,
-			fmt.Sprintf("[%d:v:0]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p,setpts=PTS-STARTPTS[v%d]", videoInput, renderWidth, renderHeight, renderWidth, renderHeight, renderFrameRate, index),
-			fmt.Sprintf("[%d:a:0]aresample=48000,aformat=sample_fmts=s32:channel_layouts=mono,asetpts=PTS-STARTPTS[a%d]", audioInput, index))
+			fmt.Sprintf("[%d:v:0]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p,tpad=stop_mode=clone:stop_duration=%s,trim=duration=%s,setpts=PTS-STARTPTS[v%d]", videoInput, renderWidth, renderHeight, renderWidth, renderHeight, renderFrameRate, duration, duration, index),
+			fmt.Sprintf("[%d:a:0]aresample=48000,aformat=sample_fmts=s32:channel_layouts=mono,apad=pad_dur=%s,atrim=duration=%s,asetpts=PTS-STARTPTS[a%d]", audioInput, duration, duration, index))
 		concatInputs.WriteString(fmt.Sprintf("[v%d][a%d]", index, index))
 	}
-	filters = append(filters, fmt.Sprintf("%sconcat=n=%d:v=1:a=1[outv][outa]", concatInputs.String(), len(sources)))
-	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-map", "[outv]", "-map", "[outa]",
+	filters = append(filters,
+		fmt.Sprintf("%sconcat=n=%d:v=1:a=1[outv][joined]", concatInputs.String(), len(sources)),
+		"[joined]asplit=2[outaac][outlossless]")
+	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-map", "[outv]", "-map", "[outaac]", "-map", "[outlossless]",
 		"-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p", "-threads", "2",
-		"-c:a", "alac", "-ar", "48000", "-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
+		"-c:a:0", "aac", "-b:a:0", "320k", "-ar:a:0", "48000", "-metadata:s:a:0", "title=Compatibility AAC", "-metadata:s:a:0", "handler_name=Compatibility AAC", "-disposition:a:0", "default",
+		"-c:a:1", "alac", "-ar:a:1", "48000", "-metadata:s:a:1", "title=Lossless ALAC Master", "-metadata:s:a:1", "handler_name=Lossless ALAC Master", "-disposition:a:1", "0",
+		"-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
 	return args
 }
 
