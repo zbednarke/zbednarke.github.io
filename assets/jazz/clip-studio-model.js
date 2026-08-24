@@ -5,6 +5,9 @@
   const MAX_DURATION_MS = 10 * 60 * 1000;
   const MIN_SOURCE_CLIP_MS = 500;
   const DEFAULT_SOURCE_CLIP_MS = 10 * 1000;
+  const MIN_RENDER_ESTIMATE_MS = 45 * 1000;
+  const RENDER_FIXED_ESTIMATE_MS = 20 * 1000;
+  const RENDER_REALTIME_FACTOR = 3;
 
   function defaultTitle(dateKey) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ""));
@@ -54,6 +57,10 @@
     return project.clips.reduce((sum, clip) => sum + Math.max(0, Number(clip.endMs) - Number(clip.startMs)), 0);
   }
 
+  function estimatedRenderMS(project) {
+    return Math.max(MIN_RENDER_ESTIMATE_MS, Math.round(RENDER_FIXED_ESTIMATE_MS + totalDurationMS(project) * RENDER_REALTIME_FACTOR));
+  }
+
   function placeDefaultSourceClip(clickMS, durationMS, clips, targetLengthMS = DEFAULT_SOURCE_CLIP_MS) {
     const duration = Math.max(0, Math.round(Number(durationMS) || 0));
     if (duration < MIN_SOURCE_CLIP_MS) return null;
@@ -100,7 +107,7 @@
     };
   }
 
-  const api = { DEFAULT_SOURCE_CLIP_MS, MIN_SOURCE_CLIP_MS, MAX_CLIPS, MAX_DURATION_MS, addClip, candidateIsLiked, createProject, defaultTitle, moveClip, nextLikeStatus, normalizeProject, placeDefaultSourceClip, removeClip, renderPayload, totalDurationMS };
+  const api = { DEFAULT_SOURCE_CLIP_MS, MIN_SOURCE_CLIP_MS, MAX_CLIPS, MAX_DURATION_MS, addClip, candidateIsLiked, createProject, defaultTitle, estimatedRenderMS, moveClip, nextLikeStatus, normalizeProject, placeDefaultSourceClip, removeClip, renderPayload, totalDurationMS };
   globalThis.JazzClipStudioModel = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

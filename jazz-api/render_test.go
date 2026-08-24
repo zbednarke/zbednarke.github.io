@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestBuildFFmpegRenderArgsUsesLosslessAudioAndStandardVideo(t *testing.T) {
+func TestBuildFFmpegRenderArgsUsesCompatibleAndLosslessAudioWithExactDurations(t *testing.T) {
 	args := buildFFmpegRenderArgs([]renderSource{
 		{StartMS: 1250, EndMS: 6250, VideoURL: "https://video-one", AudioURL: "https://audio-one"},
 		{StartMS: 0, EndMS: 3000, VideoURL: "https://video-two", AudioURL: "https://audio-two"},
 	})
 	joined := strings.Join(args, " ")
-	for _, expected := range []string{"-ss 1.250 -t 5.000 -i https://video-one", "-ss 1.250 -t 5.000 -i https://audio-one", "concat=n=2:v=1:a=1", "scale=1920:1080", "-c:v libx264", "-crf 18", "-c:a alac", "-ar 48000", "pipe:1"} {
+	for _, expected := range []string{"-ss 1.250 -t 5.000 -i https://video-one", "-ss 1.250 -t 5.000 -i https://audio-one", "tpad=stop_mode=clone:stop_duration=5.000", "trim=duration=5.000", "apad=pad_dur=5.000", "atrim=duration=5.000", "concat=n=2:v=1:a=1", "asplit=2[outaac][outlossless]", "scale=1920:1080", "-c:v libx264", "-crf 18", "-c:a:0 aac", "-b:a:0 320k", "-c:a:1 alac", "title=Lossless ALAC Master", "pipe:1"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("expected ffmpeg args to contain %q; got %s", expected, joined)
 		}

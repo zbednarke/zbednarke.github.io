@@ -326,8 +326,9 @@
         <div class="studio-output-clips" id="studio-output-clips"><p>Use Add to Output to begin an edit.</p></div>
         <div class="studio-render-controls">
           <label><span>Project / filename</span><input id="studio-output-title" maxlength="120" value="Jazz practice"></label>
-          <details class="studio-quality"><summary>1080p · Lossless audio</summary><p><b>Video:</b> 1080p H.264, CRF 18<br><b>Audio:</b> lossless ALAC, 48 kHz, original levels<br>No normalization or transitions.</p></details>
+          <details class="studio-quality"><summary>1080p · AAC + lossless master</summary><p><b>Video:</b> 1080p H.264, CRF 18<br><b>Default audio:</b> AAC 320 kbps for universal playback<br><b>Master audio:</b> lossless ALAC, 48 kHz, original levels<br>No normalization or transitions.</p></details>
           <button type="button" id="studio-render">Render Output</button>
+          <div class="studio-render-progress" id="studio-render-progress" hidden><div><i id="studio-render-progress-bar"></i></div><span id="studio-render-progress-text">Preparing render…</span></div>
           <span id="studio-render-status" role="status"></span>
         </div>
       </footer>

@@ -877,6 +877,35 @@
     grip.addEventListener("pointercancel", finish);
   }
 
+  function startRenderEstimate(button) {
+    const host = $("#studio-render-progress");
+    const bar = $("#studio-render-progress-bar");
+    const label = $("#studio-render-progress-text");
+    const startedAt = Date.now();
+    const estimatedMS = Model.estimatedRenderMS(state.project);
+    host.hidden = false;
+    const tick = () => {
+      const elapsedMS = Date.now() - startedAt;
+      const fraction = Math.min(.95, elapsedMS / estimatedMS);
+      bar.style.width = `${Math.round(fraction * 100)}%`;
+      button.textContent = `Rendering · ${formatClock(elapsedMS)}`;
+      label.textContent = elapsedMS < estimatedMS
+        ? `${formatClock(elapsedMS)} elapsed · about ${formatClock(estimatedMS - elapsedMS)} remaining`
+        : `${formatClock(elapsedMS)} elapsed · finishing up (estimate was ${formatClock(estimatedMS)})`;
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    let settled = false;
+    return (completed) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      const elapsedMS = Date.now() - startedAt;
+      bar.style.width = completed ? "100%" : bar.style.width;
+      label.textContent = `${completed ? "Complete" : "Stopped"} after ${formatClock(elapsedMS)} · estimate was ${formatClock(estimatedMS)}`;
+    };
+  }
+
   async function renderOutputMovie() {
     state.project = { ...state.project, title: $("#studio-output-title").value.slice(0, 120) };
     persistProject();
@@ -889,10 +918,11 @@
     }
     const button = $("#studio-render");
     button.disabled = true;
-    button.textContent = "Rendering…";
-    setRenderStatus("Rendering 1080p video with lossless ALAC audio. Keep this page open.");
+    const finishEstimate = startRenderEstimate(button);
+    setRenderStatus("Rendering 1080p video with universal AAC playback audio and a lossless ALAC master. Keep this page open.");
     try {
       const result = await api("/studio/renders", { method: "POST", body: JSON.stringify(payload) });
+      finishEstimate(true);
       const link = document.createElement("a");
       link.href = result.url;
       link.download = result.filename || "jazz-practice.mp4";
@@ -907,6 +937,7 @@
         setRenderStatus(`QUALITY NOTICE · Downloaded ${result.filename} with ${audioQuality}; this output is not confirmed lossless.`, "error");
       }
     } catch (error) {
+      finishEstimate(false);
       setRenderStatus(`Render failed · ${error.message}`, "error");
     } finally {
       button.disabled = !state.project.clips.length;
