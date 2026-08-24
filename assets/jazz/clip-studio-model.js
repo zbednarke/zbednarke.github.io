@@ -42,6 +42,14 @@
     return { ...project, clips: project.clips.filter((clip) => clip.id !== id) };
   }
 
+  function candidateIsLiked(candidate) {
+    return candidate?.reviewStatus === "kept";
+  }
+
+  function nextLikeStatus(candidate) {
+    return candidateIsLiked(candidate) ? "suggested" : "kept";
+  }
+
   function totalDurationMS(project) {
     return project.clips.reduce((sum, clip) => sum + Math.max(0, Number(clip.endMs) - Number(clip.startMs)), 0);
   }
@@ -92,7 +100,7 @@
     };
   }
 
-  const api = { DEFAULT_SOURCE_CLIP_MS, MIN_SOURCE_CLIP_MS, MAX_CLIPS, MAX_DURATION_MS, addClip, createProject, defaultTitle, moveClip, normalizeProject, placeDefaultSourceClip, removeClip, renderPayload, totalDurationMS };
+  const api = { DEFAULT_SOURCE_CLIP_MS, MIN_SOURCE_CLIP_MS, MAX_CLIPS, MAX_DURATION_MS, addClip, candidateIsLiked, createProject, defaultTitle, moveClip, nextLikeStatus, normalizeProject, placeDefaultSourceClip, removeClip, renderPayload, totalDurationMS };
   globalThis.JazzClipStudioModel = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
