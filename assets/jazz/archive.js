@@ -6,6 +6,7 @@
   if (!U) return;
 
   const $ = (selector, root = document) => root.querySelector(selector);
+  let effectsResizeObserver = null;
   const state = {
     month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     selectedDate: U.dateKey(new Date()),
@@ -111,7 +112,25 @@
     if (location.hash === "#archive") return "archive";
     if (location.hash === "#guide-tones") return "guide-tones";
     if (location.hash === "#studio") return "studio";
+    if (location.hash === "#effects") return "effects";
     return "today";
+  }
+
+  function resizeEffectsFrame() {
+    const frame = $("#effects-frame");
+    const frameBody = frame?.contentDocument?.body;
+    if (!frame || !frameBody) return;
+    frame.style.height = `${Math.max(720, frameBody.scrollHeight + 2)}px`;
+  }
+
+  function watchEffectsFrameSize() {
+    const frame = $("#effects-frame");
+    const frameDocument = frame?.contentDocument;
+    if (!frameDocument) return;
+    effectsResizeObserver?.disconnect();
+    effectsResizeObserver = new ResizeObserver(resizeEffectsFrame);
+    if (frameDocument.body) effectsResizeObserver.observe(frameDocument.body);
+    resizeEffectsFrame();
   }
 
   function route() {
@@ -120,11 +139,14 @@
     document.body.classList.toggle("virtuoso-archive", view === "archive");
     document.body.classList.toggle("virtuoso-guide-tones", view === "guide-tones");
     document.body.classList.toggle("virtuoso-studio", view === "studio");
+    document.body.classList.toggle("virtuoso-effects", view === "effects");
     $("#today").hidden = view !== "today";
     $("#archive").hidden = view !== "archive";
     $("#guide-tones").hidden = view !== "guide-tones";
     $("#studio").hidden = view !== "studio";
-    $("#mobile-view-label").textContent = view === "archive" ? "Archive" : (view === "guide-tones" ? "Guide tones" : (view === "studio" ? "Clip studio" : "Today"));
+    $("#effects").hidden = view !== "effects";
+    const labels = { archive: "Archive", "guide-tones": "Guide tones", studio: "Clip studio", effects: "Live effects", today: "Today" };
+    $("#mobile-view-label").textContent = labels[view];
     document.querySelectorAll("[data-jazz-view]").forEach((link) => {
       const active = link.dataset.jazzView === view;
       link.classList.toggle("active", active);
@@ -132,6 +154,8 @@
       else link.removeAttribute("aria-current");
     });
     if (view === "archive" && !state.initialized) initializeArchive();
+    if (view === "effects") requestAnimationFrame(resizeEffectsFrame);
+    if (view !== "effects") $("#effects-frame")?.contentWindow?.postMessage({ type: "jazz:effects-stop" }, location.origin);
     document.dispatchEvent(new CustomEvent("jazz:view-change", { detail: { view } }));
   }
 
@@ -605,5 +629,7 @@
   }
 
   window.addEventListener("hashchange", route);
+  window.addEventListener("resize", resizeEffectsFrame);
+  $("#effects-frame")?.addEventListener("load", watchEffectsFrameSize);
   route();
 })();

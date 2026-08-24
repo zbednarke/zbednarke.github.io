@@ -31,6 +31,7 @@
     <div class="virtuoso-nav-links">
       <a class="active" href="#today" data-jazz-view="today" aria-current="page"><span aria-hidden="true">◫</span>Today</a>
       <a href="#guide-tones" data-jazz-view="guide-tones"><span aria-hidden="true">&#9835;</span>Guide tones</a>
+      <a href="#effects" data-jazz-view="effects"><span aria-hidden="true">∿</span>Live effects</a>
       <a href="#archive" data-jazz-view="archive"><span aria-hidden="true">▱</span>Archive</a>
       <a href="#studio" data-jazz-view="studio"><span aria-hidden="true">✂</span>Clip studio</a>
       <span class="disabled" title="Progress screen is coming later"><span aria-hidden="true">⌁</span>Progress</span>
@@ -147,6 +148,20 @@
 
       <div class="week-card today-week-data" aria-hidden="true">
         <span id="week-hours">0.0</span><span id="week-percent">0%</span><span id="week-meter"></span><div id="week-chart"></div><p id="week-note"></p>
+      </div>
+    </section>
+
+    <section class="effects-screen" id="effects" aria-labelledby="effects-title" hidden>
+      <header class="effects-screen-header">
+        <div>
+          <p class="eyebrow">Practice tool 002</p>
+          <h1 id="effects-title">Live Effects</h1>
+          <p>Shape the Yamaha Silent Brass signal in real time, build layered sounds, and capture experiments.</p>
+        </div>
+        <div class="effects-safety-note"><span>Monitor safely</span><strong>Use headphones to prevent feedback</strong></div>
+      </header>
+      <div class="effects-frame-shell">
+        <iframe id="effects-frame" src="../assets/jazz/effects.html" title="Yamaha Silent Brass live effects" allow="microphone"></iframe>
       </div>
     </section>
 
