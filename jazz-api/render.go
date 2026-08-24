@@ -170,7 +170,14 @@ func buildFFmpegRenderArgs(sources []renderSource) []string {
 	for _, source := range sources {
 		start := formatFFmpegSeconds(source.StartMS)
 		duration := formatFFmpegSeconds(source.EndMS - source.StartMS)
-		args = append(args, "-ss", start, "-t", duration, "-i", source.VideoURL)
+		// Browser-recorded MP4s can have sparse keyframes. With input-side
+		// seeking, -t starts counting at the preceding keyframe while accurate
+		// seeking discards that preroll. The result can contain only a few real
+		// frames, after which tpad clones the last frame for the rest of the
+		// requested clip. Leave the video input open and let the trim filter set
+		// the exact clip duration; this preserves accurate seeking without
+		// silently manufacturing long frozen regions.
+		args = append(args, "-ss", start, "-i", source.VideoURL)
 		args = append(args, "-ss", start, "-t", duration, "-i", source.AudioURL)
 	}
 	filters := make([]string, 0, len(sources)*2+1)
