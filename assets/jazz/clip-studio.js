@@ -99,6 +99,7 @@
     $("#studio-candidate-notes").addEventListener("blur", () => saveNoteNow());
     $("#studio-add-output").onclick = addCurrentToOutput;
     $("#studio-split-clip").onclick = splitCurrentClip;
+    $("#studio-like").onclick = () => toggleCandidateLike(state.current);
     $("#studio-reject").onclick = rejectCurrent;
     $("#studio-output-title").addEventListener("input", (event) => {
       state.project = { ...state.project, title: event.target.value.slice(0, 120) };
@@ -210,6 +211,7 @@
     $("#studio-total-time").textContent = formatClock(duration);
     $("#studio-take-count").textContent = String(state.recordings.length);
     $("#studio-candidate-count").textContent = String(state.candidates.filter((item) => item.reviewStatus !== "rejected").length);
+    $("#studio-liked-count").textContent = String(state.candidates.filter(Model.candidateIsLiked).length);
     syncAddClipControl();
     renderRecordings();
     renderCandidates();
@@ -302,7 +304,8 @@
   function regionMarkup(candidate, duration) {
     const left = Math.max(0, Math.min(100, candidate.startMs / duration * 100));
     const right = Math.max(left, Math.min(100, candidate.endMs / duration * 100));
-    return `<div class="studio-clip-region${state.current?.id === candidate.id ? " active" : ""}" data-region-id="${candidate.id}" style="left:${left}%;width:${Math.max(.35, right - left)}%"><button class="studio-region-hit" type="button" data-studio-candidate="${candidate.id}" aria-label="Edit candidate ${formatClock(candidate.startMs)} to ${formatClock(candidate.endMs)}"></button><button class="studio-clip-boundary left" type="button" data-boundary-candidate="${candidate.id}" data-boundary-edge="start" aria-label="Drag candidate in point"></button><button class="studio-clip-boundary right" type="button" data-boundary-candidate="${candidate.id}" data-boundary-edge="end" aria-label="Drag candidate out point"></button></div>`;
+    const liked = Model.candidateIsLiked(candidate);
+    return `<div class="studio-clip-region${state.current?.id === candidate.id ? " active" : ""}${liked ? " liked" : ""}" data-region-id="${candidate.id}" style="left:${left}%;width:${Math.max(.35, right - left)}%"><button class="studio-region-hit" type="button" data-studio-candidate="${candidate.id}" aria-label="${liked ? "Liked clip" : "Edit candidate"} ${formatClock(candidate.startMs)} to ${formatClock(candidate.endMs)}"></button>${liked ? '<span class="studio-region-liked" aria-hidden="true">♥</span>' : ""}<button class="studio-clip-boundary left" type="button" data-boundary-candidate="${candidate.id}" data-boundary-edge="start" aria-label="Drag candidate in point"></button><button class="studio-clip-boundary right" type="button" data-boundary-candidate="${candidate.id}" data-boundary-edge="end" aria-label="Drag candidate out point"></button></div>`;
   }
 
   function renderCandidates() {
@@ -317,9 +320,14 @@
       const manual = candidate.source === "manual";
       const label = candidate.reviewStatus === "rejected" ? "Rejected" : (manual ? "Manual clip" : `Suggestion ${index + 1}`);
       const source = manual ? "Placed manually" : `${Math.round(Number(candidate.score || 0) * 100)}% activity confidence`;
-      return `<article class="clip-candidate ${candidate.reviewStatus}${state.current?.id === candidate.id ? " active" : ""}"><button class="clip-candidate-open" type="button" data-open-candidate="${candidate.id}"><span>${label}</span><strong>${escapeHTML(titleFor(recording))} · ${escapeHTML(U.takeLabel(recording))}</strong><time>${formatClock(candidate.startMs)} — ${formatClock(candidate.endMs)}</time><em>${source}</em></button><div class="clip-candidate-reasons">${reasons.map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div></article>`;
+      const liked = Model.candidateIsLiked(candidate);
+      return `<article class="clip-candidate ${candidate.reviewStatus}${state.current?.id === candidate.id ? " active" : ""}"><div class="clip-candidate-toolbar"><span>${label}</span><button class="clip-candidate-like" type="button" data-like-candidate="${candidate.id}" aria-label="${liked ? "Unlike" : "Like"} ${escapeHTML(titleFor(recording))} ${escapeHTML(U.takeLabel(recording))}" aria-pressed="${liked}"${candidate.likePending ? " disabled" : ""}>♥ <b>${liked ? "Liked" : "Like"}</b></button></div><button class="clip-candidate-open" type="button" data-open-candidate="${candidate.id}"><strong>${escapeHTML(titleFor(recording))} · ${escapeHTML(U.takeLabel(recording))}</strong><time>${formatClock(candidate.startMs)} — ${formatClock(candidate.endMs)}</time><em>${source}</em></button><div class="clip-candidate-reasons">${reasons.map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div></article>`;
     }).join("");
     host.querySelectorAll("[data-open-candidate]").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.openCandidate)));
+    host.querySelectorAll("[data-like-candidate]").forEach((button) => button.addEventListener("click", () => {
+      const candidate = state.candidates.find((item) => item.id === button.dataset.likeCandidate);
+      toggleCandidateLike(candidate);
+    }));
   }
 
   async function selectCandidate(id) {
@@ -332,12 +340,13 @@
     renderCandidates();
     updateRegionSelection();
     $("#studio-playback-mode").textContent = "Editing clip";
-    $("#studio-preview-title").textContent = `${titleFor(recording)} · ${U.takeLabel(recording)}`;
+    $("#studio-preview-title").textContent = `${Model.candidateIsLiked(candidate) ? "♥ " : ""}${titleFor(recording)} · ${U.takeLabel(recording)}`;
     $("#studio-start").value = (candidate.startMs / 1000).toFixed(1);
     $("#studio-end").value = (candidate.endMs / 1000).toFixed(1);
     $("#studio-candidate-notes").value = candidate.notes || "";
     $("#studio-editor").hidden = false;
     $("#studio-raw-notice").hidden = true;
+    updateLikeControl();
     updateSplitControl();
     await loadPlayer(recording, candidate.startMs);
   }
@@ -668,11 +677,7 @@
         const result = await api(`/studio/candidates/${candidate.id}`, { method: "PATCH", body: JSON.stringify(payload) });
         Object.assign(candidate, result);
         setStatus(successMessage, "success");
-        if (refresh) {
-          renderCandidates();
-          renderRecordings();
-          updatePlayhead();
-        }
+        if (refresh) refreshCandidateDisplays();
         return result;
       } catch (error) {
         setStatus(`Could not save · ${error.message}`, "error");
@@ -680,6 +685,40 @@
       }
     });
     return state.savePromise;
+  }
+
+  function updateLikeControl() {
+    const button = $("#studio-like");
+    const candidate = state.currentMode === "candidate" ? state.current : null;
+    if (!button || !candidate) return;
+    const liked = Model.candidateIsLiked(candidate);
+    button.setAttribute("aria-pressed", String(liked));
+    button.disabled = Boolean(candidate.likePending);
+    button.textContent = liked ? "♥ Liked" : "♡ Like clip";
+    if (state.currentRecording) {
+      $("#studio-preview-title").textContent = `${liked ? "♥ " : ""}${titleFor(state.currentRecording)} · ${U.takeLabel(state.currentRecording)}`;
+    }
+  }
+
+  function refreshCandidateDisplays() {
+    render();
+    renderOutputTimeline();
+    updatePlayhead();
+    updateRegionSelection();
+    updateLikeControl();
+  }
+
+  async function toggleCandidateLike(candidate) {
+    if (!candidate || candidate.likePending) return;
+    const previousStatus = candidate.reviewStatus;
+    const nextStatus = Model.nextLikeStatus(candidate);
+    candidate.reviewStatus = nextStatus;
+    candidate.likePending = true;
+    refreshCandidateDisplays();
+    const result = await patchCandidate(candidate, { reviewStatus: nextStatus }, nextStatus === "kept" ? "Clip liked" : "Like removed", false);
+    if (!result) candidate.reviewStatus = previousStatus;
+    candidate.likePending = false;
+    refreshCandidateDisplays();
   }
 
   function updateSplitControl() {
@@ -751,6 +790,7 @@
       id: localID(), candidateId: candidate.id, recordingId: recording.id,
       startMs: candidate.startMs, endMs: candidate.endMs, title: titleFor(recording),
       takeNumber: recording.takeNumber || 0, practiceDate: recording.practiceDate || state.date,
+      liked: Model.candidateIsLiked(candidate),
     };
     try {
       state.project = Model.addClip(state.project, clip);
@@ -772,7 +812,9 @@
     }
     host.innerHTML = state.project.clips.map((clip, index) => {
       const take = clip.takeNumber ? ` · Take ${clip.takeNumber}` : "";
-      return `<article class="studio-output-clip" draggable="true" data-output-index="${index}" data-output-id="${clip.id}" style="--clip-weight:${Math.max(1, clip.endMs - clip.startMs)}"><button class="studio-output-grip" type="button" data-output-grip aria-label="Drag to reorder ${escapeHTML(clip.title)}">⠿</button><button class="studio-output-open" type="button" data-output-open="${clip.id}"><strong>${escapeHTML(clip.title)}${take}</strong><span>${formatClock(clip.startMs)} — ${formatClock(clip.endMs)}</span></button><button class="studio-output-remove" type="button" data-output-remove="${clip.id}" aria-label="Remove ${escapeHTML(clip.title)} from output">×</button></article>`;
+      const sourceCandidate = state.candidates.find((candidate) => candidate.id === clip.candidateId);
+      const liked = sourceCandidate ? Model.candidateIsLiked(sourceCandidate) : Boolean(clip.liked);
+      return `<article class="studio-output-clip${liked ? " liked" : ""}" draggable="true" data-output-index="${index}" data-output-id="${clip.id}" style="--clip-weight:${Math.max(1, clip.endMs - clip.startMs)}"><button class="studio-output-grip" type="button" data-output-grip aria-label="Drag to reorder ${escapeHTML(clip.title)}">⠿</button><button class="studio-output-open" type="button" data-output-open="${clip.id}"><strong>${liked ? '<span class="studio-output-liked" aria-label="Liked clip">♥</span>' : ""}${escapeHTML(clip.title)}${take}</strong><span>${formatClock(clip.startMs)} — ${formatClock(clip.endMs)}</span></button><button class="studio-output-remove" type="button" data-output-remove="${clip.id}" aria-label="Remove ${escapeHTML(clip.title)} from output">×</button></article>`;
     }).join("");
     host.querySelectorAll("[data-output-open]").forEach((button) => button.addEventListener("click", () => {
       const clip = state.project.clips.find((item) => item.id === button.dataset.outputOpen);

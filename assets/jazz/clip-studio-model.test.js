@@ -7,10 +7,19 @@ function clip(id, startMs = 0, endMs = 1000) {
 }
 
 test("output clips are deep copies and preserve their added boundaries", () => {
-  const source = clip("one", 1000, 4000);
+  const source = { ...clip("one", 1000, 4000), liked: true };
   const project = model.addClip(model.createProject("2026-08-22"), source);
   source.startMs = 2000;
+  source.liked = false;
   assert.equal(project.clips[0].startMs, 1000);
+  assert.equal(project.clips[0].liked, true);
+});
+
+test("candidate likes map to the persistent kept review state", () => {
+  assert.equal(model.candidateIsLiked({ reviewStatus: "kept" }), true);
+  assert.equal(model.candidateIsLiked({ reviewStatus: "suggested" }), false);
+  assert.equal(model.nextLikeStatus({ reviewStatus: "kept" }), "suggested");
+  assert.equal(model.nextLikeStatus({ reviewStatus: "suggested" }), "kept");
 });
 
 test("output clips can be reordered and removed", () => {

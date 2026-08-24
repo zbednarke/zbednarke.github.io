@@ -284,6 +284,7 @@
         <div><span>Recorded</span><strong id="studio-total-time">0:00</strong></div>
         <div><span>Takes</span><strong id="studio-take-count">0</strong></div>
         <div><span>Suggestions</span><strong id="studio-candidate-count">0</strong></div>
+        <div><span>Liked</span><strong id="studio-liked-count">0</strong></div>
         <div class="clip-studio-summary-status"><span>Status</span><strong id="studio-status" role="status">Choose a practice day</strong></div>
       </div>
 
@@ -306,6 +307,7 @@
               <div class="studio-clip-actions"><button type="button" id="studio-split-clip" disabled>Split at playhead</button><button class="studio-add-output" type="button" id="studio-add-output">Add to Output</button></div>
               <label class="clip-studio-notes"><span>Editor note</span><textarea id="studio-candidate-notes" rows="4" maxlength="2000" placeholder="Why is this worth keeping? What needs trimming?"></textarea></label>
               <div class="clip-studio-review-actions">
+                <button type="button" id="studio-like" aria-pressed="false">♡ Like clip</button>
                 <button type="button" id="studio-reject">Reject suggestion</button>
               </div>
             </div>
