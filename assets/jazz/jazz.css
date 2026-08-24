@@ -1423,6 +1423,12 @@ footer p[data-tone="offline"] { color: var(--red); }
 .clip-studio-summary-status strong[data-tone=error]{color:var(--red)}
 .clip-studio-workspace{grid-template-columns:minmax(500px,1.35fr) minmax(330px,.8fr);grid-template-areas:"timeline side";gap:20px}
 .clip-studio-timeline{grid-area:timeline}
+.studio-timeline-header{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.studio-timeline-header>div{min-width:0}
+.studio-timeline-header #studio-add-clip{min-height:34px;padding:0 14px;border:1px solid rgba(181,147,91,.6);background:transparent;color:var(--brass-light);cursor:pointer;font:700 7px var(--mono);letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}
+.studio-timeline-header #studio-add-clip[aria-pressed=true]{background:var(--brass);color:#131314}
+.studio-timeline-header #studio-add-clip:disabled{cursor:not-allowed;opacity:.4}
+.studio-add-clip-hint{margin:0;padding:11px 20px;border-bottom:1px solid var(--line);background:rgba(181,147,91,.08);color:var(--brass-light);font:8px/1.55 var(--mono)}
 .clip-studio-right-column{grid-area:side;display:grid;gap:20px;align-content:start}
 .clip-studio-right-column>.clip-studio-preview,.clip-studio-right-column>.clip-studio-candidates{grid-area:auto}
 .clip-studio-preview{position:static}
@@ -1439,8 +1445,13 @@ footer p[data-tone="offline"] { color: var(--red); }
 .studio-playhead{position:absolute;z-index:6;inset-block:0;width:1px;background:#f3f3f2;pointer-events:none}
 .studio-playhead i{position:absolute;top:-3px;left:50%;width:7px;height:7px;transform:translateX(-50%) rotate(45deg);background:#f3f3f2}
 .clip-studio-waveform{cursor:crosshair;overflow:visible}
+.adding-clip .clip-studio-waveform{box-shadow:0 0 0 1px rgba(210,183,127,.75),0 0 22px rgba(181,147,91,.12)}
 .clip-studio-boundaries{grid-template-columns:1fr 1fr}
-.studio-add-output{width:100%;min-height:42px;margin-top:10px;border:1px solid #b5935b;background:#b5935b;color:#131314;cursor:pointer;font:700 8px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+.studio-clip-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:8px;margin-top:10px}
+.studio-clip-actions button{min-height:42px;cursor:pointer;font:700 8px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.studio-clip-actions #studio-split-clip{border:1px solid rgba(165,201,159,.46);background:transparent;color:var(--green)}
+.studio-clip-actions #studio-split-clip:disabled{cursor:not-allowed;opacity:.35}
+.studio-add-output{width:100%;border:1px solid #b5935b;background:#b5935b;color:#131314}
 .clip-studio-review-actions #studio-reject{border-color:rgba(185,103,103,.5);color:#d49a9a}
 .clip-studio-raw-notice{margin:0 20px 20px;padding:10px 12px;border-left:2px solid #b5935b;background:rgba(181,147,91,.06);color:var(--muted);font:8px/1.5 var(--mono)}
 .studio-output-dock{position:fixed;z-index:32;right:0;bottom:0;left:256px;display:grid;grid-template-columns:auto minmax(280px,1fr) minmax(320px,430px);gap:14px;align-items:stretch;padding:14px 20px;border-top:1px solid rgba(181,147,91,.42);background:rgba(17,16,17,.97);box-shadow:0 -16px 45px rgba(0,0,0,.32);backdrop-filter:blur(12px)}
@@ -1470,7 +1481,7 @@ footer p[data-tone="offline"] { color: var(--red); }
 #studio-render-status[data-tone=success]{color:var(--green)}#studio-render-status[data-tone=error]{color:#d49a9a}
 @media(max-width:1180px){.clip-studio-header{align-items:flex-start}.clip-studio-header-tools{flex-direction:column;align-items:stretch}.clip-studio-workspace{grid-template-columns:1fr;grid-template-areas:"timeline" "side"}.clip-studio-right-column{grid-template-columns:1fr 1fr}.studio-output-dock{left:218px;grid-template-columns:auto minmax(220px,1fr) minmax(285px,390px)}}
 @media(max-width:900px){.clip-studio-right-column{grid-template-columns:1fr}.studio-output-dock{grid-template-columns:auto minmax(190px,1fr) minmax(250px,330px)}.studio-output-heading{display:none}}
-@media(max-width:760px){.clip-studio-screen{padding-bottom:48px}.clip-studio-header-tools{margin-top:20px}.studio-scan-menu{order:2}.clip-studio-summary{grid-template-columns:repeat(3,1fr)}.clip-studio-summary-status{grid-column:1/-1;border-top:1px solid var(--line)}.clip-studio-summary-status strong{text-align:left}.studio-output-dock{display:none}.studio-add-output{display:none}.clip-studio-waveform{height:70px}.studio-clip-boundary{width:15px;min-width:15px!important}.studio-clip-boundary.left{left:-7px}.studio-clip-boundary.right{right:-7px}}
+@media(max-width:760px){.clip-studio-screen{padding-bottom:48px}.clip-studio-header-tools{margin-top:20px}.studio-scan-menu{order:2}.clip-studio-summary{grid-template-columns:repeat(3,1fr)}.clip-studio-summary-status{grid-column:1/-1;border-top:1px solid var(--line)}.clip-studio-summary-status strong{text-align:left}.studio-output-dock{display:none}.studio-clip-actions{grid-template-columns:1fr}.studio-add-output{display:none}.clip-studio-waveform{height:70px}.studio-clip-boundary{width:15px;min-width:15px!important}.studio-clip-boundary.left{left:-7px}.studio-clip-boundary.right{right:-7px}}
 
 /* Yamaha Silent Brass live-effects tool */
 .virtuoso-effects {

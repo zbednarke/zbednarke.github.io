@@ -14,7 +14,7 @@
     current: null, currentRecording: null, currentMode: "idle", media: null,
     loadRequest: 0, playbackRequest: 0, savePromise: Promise.resolve(), saveTimers: new Map(),
     playbackURLs: new Map(), players: new Map(), playerLoads: new Map(), playerUse: 0, warmToken: 0,
-    project: Model.createProject(U.dateKey(new Date())), draggedOutputIndex: -1,
+    project: Model.createProject(U.dateKey(new Date())), draggedOutputIndex: -1, addMode: false, addModeBusy: false, loadingDay: false,
   };
 
   async function api(path, options = {}) {
@@ -92,11 +92,13 @@
     $("#studio-previous-day").addEventListener("click", () => shiftDay(-1));
     $("#studio-next-day").addEventListener("click", () => shiftDay(1));
     $("#studio-scan").addEventListener("click", () => scanDay(false));
+    $("#studio-add-clip").addEventListener("click", () => setAddClipMode(!state.addMode));
     $("#studio-start").addEventListener("input", () => updateBoundaryFromInputs("start"));
     $("#studio-end").addEventListener("input", () => updateBoundaryFromInputs("end"));
     $("#studio-candidate-notes").addEventListener("input", () => scheduleNoteSave());
     $("#studio-candidate-notes").addEventListener("blur", () => saveNoteNow());
     $("#studio-add-output").onclick = addCurrentToOutput;
+    $("#studio-split-clip").onclick = splitCurrentClip;
     $("#studio-reject").onclick = rejectCurrent;
     $("#studio-output-title").addEventListener("input", (event) => {
       state.project = { ...state.project, title: event.target.value.slice(0, 120) };
@@ -117,9 +119,11 @@
   async function loadDay(date) {
     if (!U.parseDateKey(date)) return;
     const request = ++state.loadRequest;
+    state.loadingDay = true;
     state.warmToken++;
     if (state.date !== date) persistProject();
     state.date = date;
+    setAddClipMode(false);
     loadProject();
     $("#studio-date").value = date;
     setStatus("Loading lossless masters");
@@ -151,6 +155,11 @@
       render();
       setScanState("error", "Scan unavailable", error.message);
       setStatus(`Studio unavailable · ${error.message}`, "error");
+    } finally {
+      if (request === state.loadRequest) {
+        state.loadingDay = false;
+        syncAddClipControl();
+      }
     }
   }
 
@@ -201,8 +210,24 @@
     $("#studio-total-time").textContent = formatClock(duration);
     $("#studio-take-count").textContent = String(state.recordings.length);
     $("#studio-candidate-count").textContent = String(state.candidates.filter((item) => item.reviewStatus !== "rejected").length);
+    syncAddClipControl();
     renderRecordings();
     renderCandidates();
+  }
+
+  function syncAddClipControl() {
+    const button = $("#studio-add-clip");
+    button.disabled = state.loadingDay || state.addModeBusy || !state.recordings.length;
+    button.setAttribute("aria-pressed", String(state.addMode));
+    button.textContent = state.addMode ? "Cancel adding" : "+ Add clip";
+    $("#studio-add-clip-hint").hidden = !state.addMode;
+    $("#studio-recordings").classList.toggle("adding-clip", state.addMode);
+  }
+
+  function setAddClipMode(active) {
+    state.addMode = Boolean(active);
+    syncAddClipControl();
+    if (state.addMode) setStatus("Click an empty point on a recording to add a ten-second clip");
   }
 
   function renderRecordings() {
@@ -214,6 +239,10 @@
     host.innerHTML = state.recordings.map((recording) => recordingMarkup(recording)).join("");
     host.querySelectorAll("[data-studio-candidate]").forEach((button) => button.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (state.addMode) {
+        setStatus("That point is already inside a clip; choose an empty point");
+        return;
+      }
       selectCandidate(button.dataset.studioCandidate);
     }));
     host.querySelectorAll("[data-boundary-candidate]").forEach((handle) => handle.addEventListener("pointerdown", (event) => beginBoundaryDrag(event, handle)));
@@ -223,8 +252,40 @@
       if (!recording) return;
       const bounds = waveform.getBoundingClientRect();
       const percentage = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-      browseRecording(recording, Math.round(Number(recording.durationMs || 0) * percentage));
+      const clickMS = Math.round(Number(recording.durationMs || 0) * percentage);
+      if (state.addMode) createManualClip(recording, clickMS);
+      else browseRecording(recording, clickMS);
     }));
+  }
+
+  async function createManualClip(recording, clickMS) {
+    if (state.addModeBusy) return;
+    const existing = state.candidates.filter((candidate) => candidate.recordingId === recording.id && candidate.reviewStatus !== "rejected");
+    const inside = existing.some((candidate) => clickMS >= candidate.startMs && clickMS <= candidate.endMs);
+    if (inside) {
+      setStatus("That point is already inside a clip; choose an empty point");
+      return;
+    }
+    const placement = Model.placeDefaultSourceClip(clickMS, Number(recording.durationMs || 0), existing);
+    if (!placement) {
+      setStatus("There is no open ten-second space near that point", "error");
+      return;
+    }
+    state.addModeBusy = true;
+    syncAddClipControl();
+    try {
+      const candidate = await api(`/studio/recordings/${recording.id}/candidates`, { method: "POST", body: JSON.stringify(placement) });
+      state.candidates.push(candidate);
+      setAddClipMode(false);
+      render();
+      await selectCandidate(candidate.id);
+      setStatus(`Manual clip added · ${formatClock(candidate.startMs)}–${formatClock(candidate.endMs)}`, "success");
+    } catch (error) {
+      setStatus(`Could not add clip · ${error.message}`, "error");
+    } finally {
+      state.addModeBusy = false;
+      syncAddClipControl();
+    }
   }
 
   function recordingMarkup(recording) {
@@ -253,8 +314,10 @@
     host.innerHTML = state.candidates.map((candidate, index) => {
       const recording = recordingFor(candidate);
       const reasons = Array.isArray(candidate.reasons) ? candidate.reasons : [];
-      const label = candidate.reviewStatus === "rejected" ? "Rejected" : `Suggestion ${index + 1}`;
-      return `<article class="clip-candidate ${candidate.reviewStatus}${state.current?.id === candidate.id ? " active" : ""}"><button class="clip-candidate-open" type="button" data-open-candidate="${candidate.id}"><span>${label}</span><strong>${escapeHTML(titleFor(recording))} · ${escapeHTML(U.takeLabel(recording))}</strong><time>${formatClock(candidate.startMs)} — ${formatClock(candidate.endMs)}</time><em>${Math.round(Number(candidate.score || 0) * 100)}% activity confidence</em></button><div class="clip-candidate-reasons">${reasons.map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div></article>`;
+      const manual = candidate.source === "manual";
+      const label = candidate.reviewStatus === "rejected" ? "Rejected" : (manual ? "Manual clip" : `Suggestion ${index + 1}`);
+      const source = manual ? "Placed manually" : `${Math.round(Number(candidate.score || 0) * 100)}% activity confidence`;
+      return `<article class="clip-candidate ${candidate.reviewStatus}${state.current?.id === candidate.id ? " active" : ""}"><button class="clip-candidate-open" type="button" data-open-candidate="${candidate.id}"><span>${label}</span><strong>${escapeHTML(titleFor(recording))} · ${escapeHTML(U.takeLabel(recording))}</strong><time>${formatClock(candidate.startMs)} — ${formatClock(candidate.endMs)}</time><em>${source}</em></button><div class="clip-candidate-reasons">${reasons.map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div></article>`;
     }).join("");
     host.querySelectorAll("[data-open-candidate]").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.openCandidate)));
   }
@@ -275,6 +338,7 @@
     $("#studio-candidate-notes").value = candidate.notes || "";
     $("#studio-editor").hidden = false;
     $("#studio-raw-notice").hidden = true;
+    updateSplitControl();
     await loadPlayer(recording, candidate.startMs);
   }
 
@@ -480,9 +544,16 @@
       const duration = Math.max(1, Number(state.currentRecording.durationMs || 0) / 1000);
       playhead.style.left = `${Math.max(0, Math.min(100, Number(state.media.currentTime || 0) / duration * 100))}%`;
     });
+    updateSplitControl();
   }
 
   function beginBoundaryDrag(event, handle) {
+    if (state.addMode) {
+      event.preventDefault();
+      event.stopPropagation();
+      setStatus("That point is already on a clip boundary; choose an empty point");
+      return;
+    }
     const candidate = state.candidates.find((item) => item.id === handle.dataset.boundaryCandidate);
     const recording = recordingFor(candidate);
     const waveform = handle.closest(".clip-studio-waveform");
@@ -586,11 +657,64 @@
           renderRecordings();
           updatePlayhead();
         }
+        return result;
       } catch (error) {
         setStatus(`Could not save · ${error.message}`, "error");
+        return null;
       }
     });
     return state.savePromise;
+  }
+
+  function updateSplitControl() {
+    const button = $("#studio-split-clip");
+    if (!button) return;
+    const splitMS = Math.round(Number(state.media?.currentTime || 0) * 1000);
+    const valid = state.currentMode === "candidate" && state.current && state.media
+      && state.media.dataset.recordingId === state.currentRecording?.id
+      && splitMS - state.current.startMs >= 500 && state.current.endMs - splitMS >= 500;
+    button.disabled = !valid;
+    button.title = valid ? `Split at ${formatClock(splitMS)}` : "Move the playhead at least half a second inside the clip";
+  }
+
+  async function splitCurrentClip() {
+    const candidate = state.current;
+    const media = state.media;
+    if (!candidate || !media || state.currentMode !== "candidate") return;
+    const splitMS = Math.round(Number(media.currentTime || 0) * 1000);
+    if (splitMS - candidate.startMs < 500 || candidate.endMs - splitMS < 500) {
+      setStatus("Move the playhead at least half a second inside the clip", "error");
+      return;
+    }
+    const button = $("#studio-split-clip");
+    button.disabled = true;
+    const boundaryKey = `boundary:${candidate.id}`;
+    const noteKey = `note:${candidate.id}`;
+    clearTimeout(state.saveTimers.get(boundaryKey));
+    clearTimeout(state.saveTimers.get(noteKey));
+    state.saveTimers.delete(boundaryKey);
+    state.saveTimers.delete(noteKey);
+    const saved = await patchCandidate(candidate, {
+      startMs: candidate.startMs,
+      endMs: candidate.endMs,
+      notes: $("#studio-candidate-notes").value.trim(),
+    }, "Clip ready to split", false);
+    if (!saved) {
+      updateSplitControl();
+      return;
+    }
+    try {
+      const result = await api(`/studio/candidates/${candidate.id}/split`, { method: "POST", body: JSON.stringify({ splitMs: splitMS }) });
+      state.candidates = state.candidates.map((item) => item.id === result.left.id ? result.left : item);
+      state.candidates.push(result.right);
+      render();
+      await selectCandidate(result.right.id);
+      setStatus(`Clip split at ${formatClock(splitMS)}`, "success");
+    } catch (error) {
+      setStatus(`Could not split clip · ${error.message}`, "error");
+    } finally {
+      updateSplitControl();
+    }
   }
 
   async function rejectCurrent() {
@@ -743,11 +867,15 @@
     $("#studio-raw-notice").hidden = true;
     setBufferStatus("");
     updatePlayhead();
+    updateSplitControl();
   }
 
   document.addEventListener("jazz:view-change", (event) => {
     if (event.detail?.view === "studio") initialize();
-    else state.media?.pause();
+    else {
+      state.media?.pause();
+      setAddClipMode(false);
+    }
   });
   if (location.hash === "#studio") initialize();
 })();

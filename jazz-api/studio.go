@@ -16,6 +16,11 @@ import (
 
 const clipAnalysisVersion = "waveform-v1"
 
+const (
+	minimumClipDurationMS = 500
+	maximumSourceClips    = 100
+)
+
 type clipCandidateRow struct {
 	ID              uuid.UUID       `json:"id"`
 	RecordingID     uuid.UUID       `json:"recordingId"`
@@ -224,6 +229,192 @@ type clipCandidateUpdate struct {
 	ReviewStatus *string `json:"reviewStatus"`
 	Title        *string `json:"title"`
 	Notes        *string `json:"notes"`
+}
+
+type manualClipCandidateRequest struct {
+	StartMS int `json:"startMs"`
+	EndMS   int `json:"endMs"`
+}
+
+type splitClipCandidateRequest struct {
+	SplitMS int `json:"splitMs"`
+}
+
+type clipCandidateScanner interface {
+	Scan(dest ...any) error
+}
+
+func validManualClipBounds(startMS, endMS, durationMS int) bool {
+	start, end, duration := int64(startMS), int64(endMS), int64(durationMS)
+	return start >= 0 && end > start && end-start >= minimumClipDurationMS && end <= duration
+}
+
+func validClipSplitPoint(startMS, splitMS, endMS int) bool {
+	start, split, end := int64(startMS), int64(splitMS), int64(endMS)
+	return split > start && end > split && split-start >= minimumClipDurationMS && end-split >= minimumClipDurationMS
+}
+
+func scanClipCandidate(scanner clipCandidateScanner) (clipCandidateRow, error) {
+	var candidate clipCandidateRow
+	err := scanner.Scan(&candidate.ID, &candidate.RecordingID, &candidate.StartMS, &candidate.EndMS, &candidate.Score,
+		&candidate.Reasons, &candidate.ScoreBreakdown, &candidate.Source, &candidate.ReviewStatus,
+		&candidate.Title, &candidate.Notes, &candidate.AnalysisVersion)
+	return candidate, err
+}
+
+func (app *application) createManualClipCandidate(w http.ResponseWriter, r *http.Request) {
+	recordingID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid recording id")
+		return
+	}
+	var input manualClipCandidateRequest
+	if err := readJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.StartMS < 0 || input.EndMS <= input.StartMS {
+		writeError(w, http.StatusUnprocessableEntity, "manual clip boundaries are invalid")
+		return
+	}
+	userID, err := app.userID(r.Context())
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	tx, err := app.db.Begin(r.Context())
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var durationMS int
+	err = tx.QueryRow(r.Context(), `SELECT COALESCE(duration_ms,0) FROM recordings WHERE id=$1 AND user_id=$2 AND status='ready' FOR UPDATE`, recordingID, userID).Scan(&durationMS)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if !validManualClipBounds(input.StartMS, input.EndMS, durationMS) {
+		writeError(w, http.StatusUnprocessableEntity, "manual clip boundaries are invalid")
+		return
+	}
+	var activeCount int
+	var overlaps bool
+	err = tx.QueryRow(r.Context(), `
+		SELECT COUNT(*)::int,EXISTS(
+			SELECT 1 FROM clip_candidates WHERE user_id=$1 AND recording_id=$2 AND review_status<>'rejected'
+			AND start_ms<$4 AND end_ms>$3
+		) FROM clip_candidates WHERE user_id=$1 AND recording_id=$2 AND review_status<>'rejected'`,
+		userID, recordingID, input.StartMS, input.EndMS).Scan(&activeCount, &overlaps)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if overlaps {
+		writeError(w, http.StatusConflict, "manual clip overlaps an existing clip")
+		return
+	}
+	if activeCount >= maximumSourceClips {
+		writeError(w, http.StatusConflict, "this recording already has too many source clips")
+		return
+	}
+	candidateID := uuid.New()
+	analysisVersion := "manual-v1/" + candidateID.String()
+	candidate, err := scanClipCandidate(tx.QueryRow(r.Context(), `
+		INSERT INTO clip_candidates (id,user_id,recording_id,start_ms,end_ms,score,reasons,score_breakdown,source,review_status,analysis_version)
+		VALUES ($1,$2,$3,$4,$5,0,'["Added manually"]'::jsonb,'{"manual":1}'::jsonb,'manual','kept',$6)
+		RETURNING id,recording_id,start_ms,end_ms,score,reasons,score_breakdown,source,review_status,COALESCE(title,''),COALESCE(notes,''),analysis_version`,
+		candidateID, userID, recordingID, input.StartMS, input.EndMS, analysisVersion))
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		app.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, candidate)
+}
+
+func (app *application) splitClipCandidate(w http.ResponseWriter, r *http.Request) {
+	candidateID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid candidate id")
+		return
+	}
+	var input splitClipCandidateRequest
+	if err := readJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	userID, err := app.userID(r.Context())
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	tx, err := app.db.Begin(r.Context())
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	original, err := scanClipCandidate(tx.QueryRow(r.Context(), `
+		SELECT c.id,c.recording_id,c.start_ms,c.end_ms,c.score,c.reasons,c.score_breakdown,c.source,c.review_status,
+		COALESCE(c.title,''),COALESCE(c.notes,''),c.analysis_version
+		FROM clip_candidates c JOIN recordings rec ON rec.id=c.recording_id
+		WHERE c.id=$1 AND c.user_id=$2 AND c.review_status<>'rejected' AND rec.status='ready' FOR UPDATE OF c`, candidateID, userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "clip candidate not found")
+		return
+	}
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if !validClipSplitPoint(original.StartMS, input.SplitMS, original.EndMS) {
+		writeError(w, http.StatusUnprocessableEntity, "split point must leave at least half a second on each side")
+		return
+	}
+	var activeCount int
+	if err := tx.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM clip_candidates WHERE user_id=$1 AND recording_id=$2 AND review_status<>'rejected'`, userID, original.RecordingID).Scan(&activeCount); err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if activeCount >= maximumSourceClips {
+		writeError(w, http.StatusConflict, "this recording already has too many source clips")
+		return
+	}
+	leftVersion := "manual-v1/" + candidateID.String()
+	left, err := scanClipCandidate(tx.QueryRow(r.Context(), `
+		UPDATE clip_candidates SET end_ms=$1,source='manual',analysis_version=$2,updated_at=now()
+		WHERE id=$3 AND user_id=$4
+		RETURNING id,recording_id,start_ms,end_ms,score,reasons,score_breakdown,source,review_status,COALESCE(title,''),COALESCE(notes,''),analysis_version`,
+		input.SplitMS, leftVersion, candidateID, userID))
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	rightID := uuid.New()
+	rightVersion := "manual-v1/" + rightID.String()
+	right, err := scanClipCandidate(tx.QueryRow(r.Context(), `
+		INSERT INTO clip_candidates (id,user_id,recording_id,start_ms,end_ms,score,reasons,score_breakdown,source,review_status,title,notes,analysis_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual',$9,NULLIF($10,''),NULLIF($11,''),$12)
+		RETURNING id,recording_id,start_ms,end_ms,score,reasons,score_breakdown,source,review_status,COALESCE(title,''),COALESCE(notes,''),analysis_version`,
+		rightID, userID, original.RecordingID, input.SplitMS, original.EndMS, original.Score, original.Reasons,
+		original.ScoreBreakdown, original.ReviewStatus, original.Title, original.Notes, rightVersion))
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		app.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]clipCandidateRow{"left": left, "right": right})
 }
 
 func (app *application) updateClipCandidate(w http.ResponseWriter, r *http.Request) {

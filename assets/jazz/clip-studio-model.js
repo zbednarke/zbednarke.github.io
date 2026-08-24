@@ -3,6 +3,8 @@
 
   const MAX_CLIPS = 24;
   const MAX_DURATION_MS = 10 * 60 * 1000;
+  const MIN_SOURCE_CLIP_MS = 500;
+  const DEFAULT_SOURCE_CLIP_MS = 10 * 1000;
 
   function defaultTitle(dateKey) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ""));
@@ -44,6 +46,43 @@
     return project.clips.reduce((sum, clip) => sum + Math.max(0, Number(clip.endMs) - Number(clip.startMs)), 0);
   }
 
+  function placeDefaultSourceClip(clickMS, durationMS, clips, targetLengthMS = DEFAULT_SOURCE_CLIP_MS) {
+    const duration = Math.max(0, Math.round(Number(durationMS) || 0));
+    if (duration < MIN_SOURCE_CLIP_MS) return null;
+    const click = Math.max(0, Math.min(duration, Math.round(Number(clickMS) || 0)));
+    const intervals = (Array.isArray(clips) ? clips : [])
+      .filter((clip) => clip && clip.reviewStatus !== "rejected" && Number.isFinite(Number(clip.startMs)) && Number.isFinite(Number(clip.endMs)))
+      .map((clip) => ({ startMs: Math.max(0, Math.min(duration, Math.round(Number(clip.startMs)))), endMs: Math.max(0, Math.min(duration, Math.round(Number(clip.endMs)))) }))
+      .filter((clip) => clip.endMs > clip.startMs)
+      .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs);
+    if (intervals.some((clip) => click >= clip.startMs && click <= clip.endMs)) return null;
+
+    const occupied = [];
+    intervals.forEach((clip) => {
+      const previous = occupied[occupied.length - 1];
+      if (previous && clip.startMs <= previous.endMs) previous.endMs = Math.max(previous.endMs, clip.endMs);
+      else occupied.push({ ...clip });
+    });
+    const gaps = [];
+    let cursor = 0;
+    occupied.forEach((clip) => {
+      if (clip.startMs > cursor) gaps.push({ startMs: cursor, endMs: clip.startMs });
+      cursor = Math.max(cursor, clip.endMs);
+    });
+    if (cursor < duration) gaps.push({ startMs: cursor, endMs: duration });
+
+    const length = Math.min(duration, Math.max(MIN_SOURCE_CLIP_MS, Math.round(Number(targetLengthMS) || DEFAULT_SOURCE_CLIP_MS)));
+    return gaps
+      .filter((gap) => gap.endMs - gap.startMs >= length)
+      .map((gap) => {
+        const startMs = Math.max(gap.startMs, Math.min(click - length / 2, gap.endMs - length));
+        const roundedStart = Math.round(startMs);
+        return { startMs: roundedStart, endMs: roundedStart + length, distance: Math.abs(roundedStart + length / 2 - click) };
+      })
+      .sort((left, right) => left.distance - right.distance || left.startMs - right.startMs)
+      .map(({ startMs, endMs }) => ({ startMs, endMs }))[0] || null;
+  }
+
   function renderPayload(project) {
     if (!project.clips.length) throw new Error("Add at least one clip before rendering.");
     if (!String(project.title || "").trim()) throw new Error("Give the output a project title.");
@@ -53,7 +92,7 @@
     };
   }
 
-  const api = { MAX_CLIPS, MAX_DURATION_MS, addClip, createProject, defaultTitle, moveClip, normalizeProject, removeClip, renderPayload, totalDurationMS };
+  const api = { DEFAULT_SOURCE_CLIP_MS, MIN_SOURCE_CLIP_MS, MAX_CLIPS, MAX_DURATION_MS, addClip, createProject, defaultTitle, moveClip, normalizeProject, placeDefaultSourceClip, removeClip, renderPayload, totalDurationMS };
   globalThis.JazzClipStudioModel = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
