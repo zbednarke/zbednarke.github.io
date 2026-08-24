@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silent Brass Effects · Jazz Project</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1d2026;
+    --panel-edge: #2a2e36;
+    --text: #e6e4dc;
+    --dim: #8b8fa3;
+    --accent: #e8a33d;
+    --accent2: #5fb4a2;
+    --danger: #d9534f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 20px; font-size: 13px; }
+  .top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  button {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 8px;
+    padding: 8px 16px; font-size: 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #14161a; border-color: var(--accent); font-weight: 600; }
+  button.active { background: var(--accent2); color: #14161a; border-color: var(--accent2); font-weight: 600; }
+  button.rec { background: var(--danger); color: #fff; border-color: var(--danger); }
+  button:disabled { opacity: .4; cursor: default; }
+  select {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 8px; padding: 8px; font-size: 14px;
+  }
+  .status { font-size: 13px; color: var(--dim); }
+  .warn {
+    background: #3a2f1a; border: 1px solid #6b5522; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; margin-bottom: 16px;
+  }
+  .meter-wrap { display:flex; align-items:center; gap:10px; margin-bottom: 20px; }
+  .meter { flex: 1; height: 14px; background: var(--panel); border-radius: 7px; overflow: hidden; border: 1px solid var(--panel-edge); }
+  .meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent2), var(--accent) 70%, var(--danger)); transition: width .05s linear; }
+  .clip { font-size: 12px; color: var(--dim); width: 40px; }
+  .clip.on { color: var(--danger); font-weight: 700; }
+  .rack { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .fx {
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    border-radius: 12px; padding: 14px;
+  }
+  .fx.off { opacity: .45; }
+  .fx header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .fx h2 { font-size: 15px; margin: 0; }
+  .toggle {
+    width: 40px; height: 22px; border-radius: 11px; background: #3a3e48;
+    position: relative; cursor: pointer; border: none; padding: 0;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 18px; height: 18px; border-radius: 50%; background: #9aa0b4; transition: left .12s;
+  }
+  .toggle.on { background: var(--accent2); }
+  .toggle.on::after { left: 20px; background: #fff; }
+  .ctl { margin: 8px 0; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); }
+  .ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+  .looper-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .footer { margin-top: 20px; font-size: 12px; color: var(--dim); }
+  a { color: var(--accent2); }
+</style>
+</head>
+<body>
+<h1>Silent Brass Effects</h1>
+<p class="sub">Yamaha Silent Brass → selected input → live Web Audio effects. Use headphones; speakers can feed back into the microphone.</p>
+
+<div class="warn" id="enhanceWarn">
+  <b>Windows tip:</b> in Sound settings → your mic's properties, disable any "audio enhancements" / "noise suppression". The page also requests raw audio, but Windows can override it.
+</div>
+
+<div class="top">
+  <button class="primary" id="startBtn">Start audio</button>
+  <select id="deviceSel" title="Input device"><option>inputs appear after start…</option></select>
+  <button id="recBtn" disabled>● Record</button>
+  <select id="presetSel">
+    <option value="">— preset —</option>
+    <option value="hall">Big Hall</option>
+    <option value="space">Space Echo</option>
+    <option value="miles">Miles '73 (wah + drive)</option>
+    <option value="dry">Almost Dry</option>
+    <option value="twohorns">Two Horns (3rds)</option>
+    <option value="hardtune">Hard-Tune (robot)</option>
+    <option value="gospel">Gospel Pad</option>
+  </select>
+  <span class="status" id="status">stopped</span>
+</div>
+
+<div class="meter-wrap">
+  <span style="font-size:12px;color:var(--dim)">IN</span>
+  <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+  <span class="clip" id="clipInd">CLIP</span>
+</div>
+
+<canvas id="scope" width="1200" height="140" style="width:100%;height:140px;background:var(--panel);border:1px solid var(--panel-edge);border-radius:12px;margin-bottom:20px;display:block"></canvas>
+<p class="status" style="margin:-14px 0 20px" id="scopeInfo">waveform appears here after Start — flat line = no signal reaching the selected input</p>
+
+<div class="rack">
+
+  <div class="fx off" data-fx="drive">
+    <header><h2>Drive</h2><button class="toggle" data-toggle="drive"></button></header>
+    <div class="ctl"><label>Amount <span>30</span></label><input type="range" data-param="drive.amount" min="0" max="100" value="30"></div>
+    <div class="ctl"><label>Mix <span>100</span></label><input type="range" data-param="drive.mix" min="0" max="100" value="100"></div>
+  </div>
+
+  <div class="fx off" data-fx="wah">
+    <header><h2>Auto-Wah</h2><button class="toggle" data-toggle="wah"></button></header>
+    <div class="ctl"><label>Sensitivity <span>50</span></label><input type="range" data-param="wah.sens" min="0" max="100" value="50"></div>
+    <div class="ctl"><label>Resonance <span>40</span></label><input type="range" data-param="wah.q" min="0" max="100" value="40"></div>
+  </div>
+
+  <div class="fx off" data-fx="pitch" id="pitchPanel">
+    <header><h2>Pitch: Tune / Harmony</h2></header>
+    <div class="ctl"><label>Mode</label>
+      <select id="pitchMode" style="width:100%">
+        <option value="off">Off</option>
+        <option value="tune">Autotune</option>
+        <option value="harmony">Harmony</option>
+      </select>
+    </div>
+    <div class="ctl" style="display:flex;gap:8px">
+      <select id="keySel" style="flex:1"></select>
+      <select id="scaleSel" style="flex:1">
+        <option value="major">Major</option>
+        <option value="minor">Minor</option>
+        <option value="mixolydian">Mixolydian</option>
+        <option value="blues">Blues</option>
+        <option value="chromatic">Chromatic</option>
+      </select>
+    </div>
+    <div class="ctl"><label>Voicing (harmony)</label>
+      <select id="voicingSel" style="width:100%">
+        <option value="third">3rd above (two horns)</option>
+        <option value="triad">3rd + 5th (section)</option>
+        <option value="fifthdown">5th below (fat)</option>
+        <option value="octaves">Octaves</option>
+      </select>
+    </div>
+    <div class="ctl"><label>Tune strength <span>90</span></label><input type="range" data-param="pitch.strength" min="0" max="100" value="90"></div>
+    <div class="ctl"><label>Glide (ms) <span>40</span></label><input type="range" data-param="pitch.glide" min="2" max="300" value="40"></div>
+    <div class="ctl"><label>Harmony mix <span>70</span></label><input type="range" data-param="pitch.mix" min="0" max="100" value="70"></div>
+    <div class="status" id="tuner">tuner: —</div>
+  </div>
+
+  <div class="fx off" data-fx="pad">
+    <header><h2>Auto-Chord Pad</h2><button class="toggle" data-toggle="pad"></button></header>
+    <div class="ctl"><label>Pad volume <span>60</span></label><input type="range" data-param="pad.vol" min="0" max="150" value="60"></div>
+    <div class="status">plays a soft chord under whatever note you hold, diatonic to the key set in the Pitch panel</div>
+  </div>
+
+  <div class="fx" data-fx="delay">
+    <header><h2>Delay</h2><button class="toggle on" data-toggle="delay"></button></header>
+    <div class="ctl"><label>Time (ms) <span>380</span></label><input type="range" data-param="delay.time" min="60" max="1200" value="380"></div>
+    <div class="ctl"><label>Feedback <span>35</span></label><input type="range" data-param="delay.fb" min="0" max="90" value="35"></div>
+    <div class="ctl"><label>Mix <span>25</span></label><input type="range" data-param="delay.mix" min="0" max="100" value="25"></div>
+  </div>
+
+  <div class="fx" data-fx="reverb">
+    <header><h2>Reverb</h2><button class="toggle on" data-toggle="reverb"></button></header>
+    <div class="ctl"><label>Size (s) <span>2.5</span></label><input type="range" data-param="reverb.size" min="0.3" max="8" step="0.1" value="2.5"></div>
+    <div class="ctl"><label>Mix <span>30</span></label><input type="range" data-param="reverb.mix" min="0" max="100" value="30"></div>
+  </div>
+
+  <div class="fx" data-fx="master">
+    <header><h2>Master</h2></header>
+    <div class="ctl"><label>Input gain <span>100</span></label><input type="range" data-param="master.input" min="0" max="300" value="100"></div>
+    <div class="ctl"><label>Output <span>90</span></label><input type="range" data-param="master.output" min="0" max="150" value="90"></div>
+  </div>
+
+  <div class="fx" data-fx="looper">
+    <header><h2>Looper</h2></header>
+    <div class="looper-row">
+      <button id="loopRecBtn" disabled>● Loop</button>
+      <button id="loopStopBtn" disabled>Stop</button>
+      <button id="loopClearBtn" disabled>Clear</button>
+    </div>
+    <div class="ctl" style="margin-top:10px"><label>Loop volume <span>80</span></label><input type="range" data-param="looper.vol" min="0" max="150" value="80"></div>
+    <div class="status" id="loopStatus">empty — hit ● Loop, play a phrase, hit it again</div>
+  </div>
+
+</div>
+
+<p class="footer" id="latency"></p>
+
+<script>
+"use strict";
+
+const $ = (s) => document.querySelector(s);
+
+window.addEventListener("error", (e) => {
+  $("#status").textContent = "JS error: " + e.message;
+});
+window.addEventListener("unhandledrejection", (e) => {
+  $("#status").textContent = "error: " + (e.reason && e.reason.message || e.reason);
+});
+
+// draw an idle scope line immediately so we know the page (v3) actually loaded
+window.addEventListener("DOMContentLoaded", () => {
+  const scope = $("#scope"), sctx = scope.getContext("2d");
+  sctx.strokeStyle = "#5a5f70"; sctx.lineWidth = 2;
+  sctx.beginPath(); sctx.moveTo(0, scope.height / 2); sctx.lineTo(scope.width, scope.height / 2); sctx.stroke();
+  sctx.fillStyle = "#8b8fa3"; sctx.font = "14px system-ui";
+  sctx.fillText("scope v5 loaded (pitch engine) — hit Start audio", 16, 24);
+});
+const state = {
+  ctx: null, stream: null, source: null,
+  nodes: {}, enabled: { drive: false, wah: false, delay: true, reverb: true, pad: false },
+  params: {
+    drive: { amount: 30, mix: 100 },
+    wah: { sens: 50, q: 40 },
+    delay: { time: 380, fb: 35, mix: 25 },
+    reverb: { size: 2.5, mix: 30 },
+    master: { input: 100, output: 90 },
+    looper: { vol: 80 },
+    pitch: { strength: 90, glide: 40, mix: 70 },
+    pad: { vol: 60 },
+  },
+  pitchCfg: { mode: "off", keyRoot: 0, scaleName: "major", voicing: "third" },
+  recorder: null, recChunks: [],
+  looper: { recorder: null, chunks: [], sourceNode: null, buffer: null, state: "empty" },
+};
+
+const RAW_AUDIO = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 1,
+};
+
+function makeImpulse(ctx, seconds) {
+  const rate = ctx.sampleRate, len = Math.max(1, Math.floor(rate * seconds));
+  const buf = ctx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2);
+    }
+  }
+  return buf;
+}
+
+function makeDriveCurve(amount) {
+  const k = amount * 4, n = 1024, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = ((3 + k) * x * 20 * Math.PI / 180) / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+const SCALES = {
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  blues: [0, 3, 5, 6, 7, 10],
+  chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+};
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+function sendPitch() {
+  $("#pitchPanel").classList.toggle("off", state.pitchCfg.mode === "off");
+  if (!state.nodes.pitch) return;
+  state.nodes.pitch.port.postMessage({
+    mode: state.pitchCfg.mode,
+    keyRoot: state.pitchCfg.keyRoot,
+    scale: SCALES[state.pitchCfg.scaleName],
+    voicing: state.pitchCfg.voicing,
+    strength: state.params.pitch.strength / 100,
+    glideMs: state.params.pitch.glide,
+    harmMix: state.params.pitch.mix / 100,
+  });
+  $("#pitchPanel").classList.toggle("off", state.pitchCfg.mode === "off");
+}
+
+const padState = { lastMidi: 0, stable: 0, silent: 0 };
+
+function setPadChord(rootMidi, t) {
+  const scale = SCALES[state.pitchCfg.scaleName];
+  const pc = ((rootMidi - state.pitchCfg.keyRoot) % 12 + 12) % 12;
+  let deg = 0, bd = 99;
+  scale.forEach((s, i) => {
+    const d = Math.min(((pc - s) % 12 + 12) % 12, ((s - pc) % 12 + 12) % 12);
+    if (d < bd) { bd = d; deg = i; }
+  });
+  const step = (n) => {
+    const L = scale.length, idx = deg + n, oct = Math.floor(idx / L);
+    return scale[idx % L] + 12 * oct - scale[deg];
+  };
+  const base = rootMidi - 12;
+  [0, step(2), step(4)].forEach((semi, i) => {
+    const f = 440 * Math.pow(2, (base + semi - 69) / 12);
+    state.nodes.padOscs[i].frequency.setTargetAtTime(f, t, 0.03);
+  });
+}
+
+function onPitchMsg(d) {
+  if (d.f0) {
+    const r = Math.round(d.midi);
+    const cents = Math.round((d.midi - r) * 100);
+    $("#tuner").textContent =
+      `tuner: ${NOTE_NAMES[((r % 12) + 12) % 12]}${Math.floor(r / 12) - 1} ` +
+      `${cents >= 0 ? "+" : ""}${cents}¢ · ${d.f0.toFixed(1)} Hz`;
+  } else {
+    $("#tuner").textContent = "tuner: —";
+  }
+  if (!state.ctx || !state.nodes.padEnv) return;
+  const t = state.ctx.currentTime;
+  if (state.enabled.pad && d.f0 && d.rms > 0.01) {
+    const r = Math.round(d.midi);
+    if (r === padState.lastMidi) padState.stable++;
+    else { padState.lastMidi = r; padState.stable = 0; }
+    padState.silent = 0;
+    if (padState.stable === 2) setPadChord(r, t);
+    state.nodes.padEnv.gain.setTargetAtTime(0.5, t, 0.1);
+  } else {
+    padState.silent++;
+    if (padState.silent > 8) state.nodes.padEnv.gain.setTargetAtTime(0, t, 0.4);
+  }
+}
+
+async function start() {
+  const ctx = new AudioContext({ latencyHint: "interactive" });
+  state.ctx = ctx;
+  await ctx.audioWorklet.addModule("pitch-worklet.js?v=1");
+  const deviceId = $("#deviceSel").value || undefined;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: deviceId && deviceId !== "default-placeholder" ? { ...RAW_AUDIO, deviceId: { exact: deviceId } } : RAW_AUDIO,
+  });
+  state.stream = stream;
+  await listDevices();
+
+  const n = state.nodes;
+  n.input = ctx.createGain();
+  n.analyser = ctx.createAnalyser();
+  n.analyser.fftSize = 2048;
+
+  n.pitch = new AudioWorkletNode(ctx, "pitch-engine", {
+    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+  });
+  n.pitch.port.onmessage = (e) => onPitchMsg(e.data);
+
+  // auto-chord pad synth: 3 detuned saws -> lowpass -> envelope -> volume
+  n.padGain = ctx.createGain(); n.padGain.gain.value = 0;
+  n.padEnv = ctx.createGain(); n.padEnv.gain.value = 0;
+  n.padFilter = ctx.createBiquadFilter();
+  n.padFilter.type = "lowpass"; n.padFilter.frequency.value = 900;
+  n.padOscs = [0, 1, 2].map(() => {
+    const o = ctx.createOscillator(); o.type = "sawtooth";
+    const g = ctx.createGain(); g.gain.value = 0.25;
+    o.connect(g); g.connect(n.padFilter); o.start();
+    return o;
+  });
+  n.padFilter.connect(n.padEnv); n.padEnv.connect(n.padGain);
+
+  // drive
+  n.driveShaper = ctx.createWaveShaper();
+  n.driveShaper.oversample = "4x";
+  n.driveWet = ctx.createGain(); n.driveDry = ctx.createGain(); n.driveOut = ctx.createGain();
+  // wah
+  n.wahFilter = ctx.createBiquadFilter(); n.wahFilter.type = "bandpass";
+  n.wahBypassDry = ctx.createGain(); n.wahWet = ctx.createGain(); n.wahOut = ctx.createGain();
+  // delay
+  n.delay = ctx.createDelay(2.0); n.delayFb = ctx.createGain();
+  n.delayWet = ctx.createGain(); n.delayDry = ctx.createGain(); n.delayOut = ctx.createGain();
+  n.delayTone = ctx.createBiquadFilter(); n.delayTone.type = "lowpass"; n.delayTone.frequency.value = 3500;
+  // reverb
+  n.convolver = ctx.createConvolver();
+  n.convolver.buffer = makeImpulse(ctx, state.params.reverb.size);
+  n.reverbWet = ctx.createGain(); n.reverbDry = ctx.createGain(); n.reverbOut = ctx.createGain();
+  // master / looper / record
+  n.master = ctx.createGain();
+  n.looperGain = ctx.createGain();
+  n.recDest = ctx.createMediaStreamDestination();
+
+  state.source = ctx.createMediaStreamSource(stream);
+  state.source.connect(n.input);
+  n.input.connect(n.analyser);
+
+  // chain: input -> pitch engine -> drive -> wah -> delay -> reverb -> master
+  n.input.connect(n.pitch);
+  n.pitch.connect(n.driveShaper); n.driveShaper.connect(n.driveWet); n.driveWet.connect(n.driveOut);
+  n.pitch.connect(n.driveDry); n.driveDry.connect(n.driveOut);
+
+  n.driveOut.connect(n.wahFilter); n.wahFilter.connect(n.wahWet); n.wahWet.connect(n.wahOut);
+  n.driveOut.connect(n.wahBypassDry); n.wahBypassDry.connect(n.wahOut);
+
+  n.wahOut.connect(n.delayTone); n.delayTone.connect(n.delay);
+  n.delay.connect(n.delayFb); n.delayFb.connect(n.delay);
+  n.delay.connect(n.delayWet); n.delayWet.connect(n.delayOut);
+  n.wahOut.connect(n.delayDry); n.delayDry.connect(n.delayOut);
+
+  n.delayOut.connect(n.convolver); n.convolver.connect(n.reverbWet); n.reverbWet.connect(n.reverbOut);
+  n.delayOut.connect(n.reverbDry); n.reverbDry.connect(n.reverbOut);
+
+  n.reverbOut.connect(n.master);
+  n.looperGain.connect(n.master);
+  n.padGain.connect(n.master);
+  n.master.connect(ctx.destination);
+  n.master.connect(n.recDest);
+
+  applyAllParams();
+  for (const fx of Object.keys(state.enabled)) applyEnabled(fx);
+
+  $("#recBtn").disabled = false;
+  $("#loopRecBtn").disabled = false;
+  $("#startBtn").textContent = "Stop audio";
+  $("#status").textContent = "live";
+  runMeter();
+  reportLatency();
+}
+
+function stop() {
+  if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+  if (state.ctx) state.ctx.close();
+  state.ctx = null; state.nodes = {};
+  $("#startBtn").textContent = "Start audio";
+  $("#status").textContent = "stopped";
+  $("#recBtn").disabled = true;
+  $("#loopRecBtn").disabled = true; $("#loopStopBtn").disabled = true; $("#loopClearBtn").disabled = true;
+}
+
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || event.data?.type !== "jazz:effects-stop") return;
+  if (state.ctx) stop();
+});
+
+async function listDevices() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const inputs = devices.filter((d) => d.kind === "audioinput");
+  const sel = $("#deviceSel");
+  const current = sel.value;
+  sel.innerHTML = "";
+  inputs.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label || "input " + (i + 1) + " (names appear after Start)";
+    sel.appendChild(o);
+  });
+  if (!inputs.length) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "no audio inputs found";
+    sel.appendChild(o);
+  }
+  if (current && [...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+navigator.mediaDevices.addEventListener("devicechange", () => listDevices());
+window.addEventListener("DOMContentLoaded", () => listDevices());
+
+function applyEnabled(fx) {
+  const n = state.nodes, on = state.enabled[fx], p = state.params;
+  if (!state.ctx) return;
+  if (fx === "drive") {
+    n.driveWet.gain.value = on ? p.drive.mix / 100 : 0;
+    n.driveDry.gain.value = on ? 1 - p.drive.mix / 100 : 1;
+  } else if (fx === "wah") {
+    n.wahWet.gain.value = on ? 1 : 0;
+    n.wahBypassDry.gain.value = on ? 0 : 1;
+  } else if (fx === "delay") {
+    n.delayWet.gain.value = on ? p.delay.mix / 100 : 0;
+    n.delayDry.gain.value = 1;
+  } else if (fx === "reverb") {
+    n.reverbWet.gain.value = on ? p.reverb.mix / 100 * 1.6 : 0;
+    n.reverbDry.gain.value = 1;
+  } else if (fx === "pad") {
+    n.padGain.gain.value = on ? p.pad.vol / 100 : 0;
+    if (!on && n.padEnv) n.padEnv.gain.setTargetAtTime(0, state.ctx.currentTime, 0.1);
+  }
+}
+
+function applyAllParams() {
+  const n = state.nodes, p = state.params;
+  if (!state.ctx) return;
+  n.input.gain.value = p.master.input / 100;
+  n.master.gain.value = p.master.output / 100;
+  n.driveShaper.curve = makeDriveCurve(p.drive.amount);
+  n.delay.delayTime.value = p.delay.time / 1000;
+  n.delayFb.gain.value = p.delay.fb / 100;
+  n.wahFilter.Q.value = 1 + p.wah.q / 8;
+  n.looperGain.gain.value = p.looper.vol / 100;
+  sendPitch();
+  for (const fx of Object.keys(state.enabled)) applyEnabled(fx);
+}
+
+function setReverbSize(sec) {
+  if (state.ctx) state.nodes.convolver.buffer = makeImpulse(state.ctx, sec);
+}
+
+// meter + auto-wah envelope follower
+function runMeter() {
+  const n = state.nodes;
+  const buf = new Float32Array(n.analyser.fftSize);
+  const scope = $("#scope"), sctx = scope.getContext("2d");
+  let clipHold = 0, env = 0;
+  const tick = () => {
+    if (!state.ctx) return;
+    n.analyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > peak) peak = a; }
+    // oscilloscope
+    const W = scope.width, H = scope.height, mid = H / 2;
+    sctx.clearRect(0, 0, W, H);
+    sctx.strokeStyle = "#2a2e36"; sctx.lineWidth = 1;
+    sctx.beginPath(); sctx.moveTo(0, mid); sctx.lineTo(W, mid); sctx.stroke();
+    sctx.strokeStyle = peak > 0.005 ? "#e8a33d" : "#5a5f70"; sctx.lineWidth = 2;
+    sctx.beginPath();
+    for (let i = 0; i < buf.length; i++) {
+      const x = (i / buf.length) * W, y = mid - buf[i] * (mid - 4);
+      i === 0 ? sctx.moveTo(x, y) : sctx.lineTo(x, y);
+    }
+    sctx.stroke();
+    const track = state.stream && state.stream.getAudioTracks()[0];
+    $("#scopeInfo").textContent =
+      `input: ${track ? track.label : "?"} · peak ${(20 * Math.log10(peak || 1e-6)).toFixed(0)} dBFS` +
+      (peak < 0.002 ? " — essentially silence at this input" : "");
+    $("#meterFill").style.width = Math.min(100, peak * 130) + "%";
+    if (peak > 0.98) clipHold = 60;
+    if (clipHold > 0) { clipHold--; $("#clipInd").classList.add("on"); } else $("#clipInd").classList.remove("on");
+    // envelope-follow the wah filter frequency
+    env = Math.max(peak, env * 0.94);
+    if (state.enabled.wah) {
+      const sens = state.params.wah.sens / 100;
+      const f = 350 + Math.min(1, env * (1 + sens * 6)) * 1800;
+      n.wahFilter.frequency.setTargetAtTime(f, state.ctx.currentTime, 0.03);
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function reportLatency() {
+  const c = state.ctx;
+  setTimeout(() => {
+    if (!state.ctx) return;
+    const base = (c.baseLatency || 0) * 1000;
+    const out = (c.outputLatency || 0) * 1000;
+    $("#latency").textContent =
+      `Sample rate ${c.sampleRate} Hz · processing latency ~${base.toFixed(1)} ms · output latency ~${out.toFixed(1)} ms (mic input latency adds more — if it feels laggy, that's your onboard sound card, not the effects).`;
+  }, 500);
+}
+
+// ---- recording (wet signal) ----
+function toggleRecord() {
+  if (state.recorder) {
+    state.recorder.stop();
+    return;
+  }
+  const rec = new MediaRecorder(state.nodes.recDest.stream);
+  state.recChunks = [];
+  rec.ondataavailable = (e) => state.recChunks.push(e.data);
+  rec.onstop = () => {
+    const blob = new Blob(state.recChunks, { type: rec.mimeType });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "trumpet-fx-" + new Date().toISOString().replace(/[:.]/g, "-") + ".webm";
+    a.click();
+    state.recorder = null;
+    $("#recBtn").textContent = "● Record";
+    $("#recBtn").classList.remove("rec");
+    $("#status").textContent = "live";
+  };
+  rec.start();
+  state.recorder = rec;
+  $("#recBtn").textContent = "■ Stop & save";
+  $("#recBtn").classList.add("rec");
+  $("#status").textContent = "recording…";
+}
+
+// ---- looper ----
+function looperTapRecord() {
+  const L = state.looper;
+  if (L.state === "empty" || L.state === "stopped") {
+    // record the WET signal so loops carry their effects
+    const rec = new MediaRecorder(state.nodes.recDest.stream);
+    L.chunks = [];
+    rec.ondataavailable = (e) => L.chunks.push(e.data);
+    rec.onstop = async () => {
+      const blob = new Blob(L.chunks, { type: rec.mimeType });
+      const buf = await state.ctx.decodeAudioData(await blob.arrayBuffer());
+      L.buffer = buf;
+      playLoop();
+    };
+    rec.start();
+    L.recorder = rec;
+    L.state = "recording";
+    $("#loopRecBtn").textContent = "■ Set loop";
+    $("#loopRecBtn").classList.add("rec");
+    $("#loopStatus").textContent = "recording loop…";
+  } else if (L.state === "recording") {
+    L.recorder.stop();
+    L.recorder = null;
+    $("#loopRecBtn").textContent = "● Loop";
+    $("#loopRecBtn").classList.remove("rec");
+  }
+}
+
+function playLoop() {
+  const L = state.looper;
+  if (!L.buffer) return;
+  const src = state.ctx.createBufferSource();
+  src.buffer = L.buffer; src.loop = true;
+  src.connect(state.nodes.looperGain);
+  src.start();
+  L.sourceNode = src;
+  L.state = "playing";
+  $("#loopStatus").textContent = `looping ${L.buffer.duration.toFixed(1)}s — play over it`;
+  $("#loopStopBtn").disabled = false;
+  $("#loopClearBtn").disabled = false;
+}
+
+function loopStop() {
+  const L = state.looper;
+  if (L.sourceNode) { L.sourceNode.stop(); L.sourceNode = null; }
+  if (L.state === "playing") {
+    L.state = "stopped";
+    $("#loopStatus").textContent = "loop stopped — ● Loop records a new one, Clear discards";
+  }
+}
+
+function loopClear() {
+  loopStop();
+  state.looper.buffer = null;
+  state.looper.state = "empty";
+  $("#loopStatus").textContent = "empty — hit ● Loop, play a phrase, hit it again";
+  $("#loopStopBtn").disabled = true;
+  $("#loopClearBtn").disabled = true;
+}
+
+// ---- presets ----
+const PRESETS = {
+  hall:  { enabled: { drive: false, wah: false, delay: false, reverb: true },
+           params: { reverb: { size: 4.5, mix: 45 } } },
+  space: { enabled: { drive: false, wah: false, delay: true, reverb: true },
+           params: { delay: { time: 450, fb: 55, mix: 40 }, reverb: { size: 2.0, mix: 25 } } },
+  miles: { enabled: { drive: true, wah: true, delay: true, reverb: true },
+           params: { drive: { amount: 45, mix: 80 }, wah: { sens: 65, q: 55 },
+                     delay: { time: 340, fb: 30, mix: 20 }, reverb: { size: 1.2, mix: 15 } } },
+  dry:   { enabled: { drive: false, wah: false, delay: false, reverb: true },
+           params: { reverb: { size: 0.8, mix: 12 } } },
+  twohorns: { enabled: { drive: false, wah: false, delay: false, reverb: true, pad: false },
+              params: { reverb: { size: 2.0, mix: 25 }, pitch: { mix: 70, glide: 40 } },
+              pitch: { mode: "harmony", voicing: "third" } },
+  hardtune: { enabled: { drive: false, wah: false, delay: true, reverb: true, pad: false },
+              params: { delay: { time: 300, fb: 20, mix: 15 }, reverb: { size: 1.5, mix: 20 },
+                        pitch: { strength: 100, glide: 4 } },
+              pitch: { mode: "tune" } },
+  gospel: { enabled: { drive: false, wah: false, delay: false, reverb: true, pad: true },
+            params: { reverb: { size: 3.0, mix: 35 }, pad: { vol: 60 } },
+            pitch: { mode: "off" } },
+};
+
+function applyPreset(name) {
+  const pre = PRESETS[name];
+  if (!pre) return;
+  Object.assign(state.enabled, pre.enabled);
+  if (pre.pitch) {
+    Object.assign(state.pitchCfg, pre.pitch);
+    $("#pitchMode").value = state.pitchCfg.mode;
+    $("#voicingSel").value = state.pitchCfg.voicing;
+  }
+  for (const [fx, vals] of Object.entries(pre.params)) Object.assign(state.params[fx], vals);
+  // sync UI
+  document.querySelectorAll("[data-toggle]").forEach((btn) => {
+    const fx = btn.dataset.toggle;
+    btn.classList.toggle("on", !!state.enabled[fx]);
+    btn.closest(".fx").classList.toggle("off", !state.enabled[fx]);
+  });
+  document.querySelectorAll("[data-param]").forEach((input) => {
+    const [fx, key] = input.dataset.param.split(".");
+    input.value = state.params[fx][key];
+    input.previousElementSibling.querySelector("span").textContent = input.value;
+  });
+  setReverbSize(state.params.reverb.size);
+  applyAllParams();
+}
+
+// ---- wiring ----
+$("#startBtn").addEventListener("click", () => (state.ctx ? stop() : start().catch((e) => {
+  $("#status").textContent = "error: " + e.message;
+})));
+$("#recBtn").addEventListener("click", toggleRecord);
+$("#deviceSel").addEventListener("change", async () => {
+  if (!state.ctx) return;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { ...RAW_AUDIO, deviceId: { exact: $("#deviceSel").value } },
+  });
+  state.stream.getTracks().forEach((t) => t.stop());
+  state.source.disconnect();
+  state.stream = stream;
+  state.source = state.ctx.createMediaStreamSource(stream);
+  state.source.connect(state.nodes.input);
+});
+$("#loopRecBtn").addEventListener("click", looperTapRecord);
+$("#loopStopBtn").addEventListener("click", loopStop);
+$("#loopClearBtn").addEventListener("click", loopClear);
+$("#presetSel").addEventListener("change", (e) => { applyPreset(e.target.value); e.target.value = ""; });
+
+// pitch panel selects
+NOTE_NAMES.forEach((nm, i) => {
+  const o = document.createElement("option");
+  o.value = i; o.textContent = "Key: " + nm;
+  $("#keySel").appendChild(o);
+});
+$("#pitchMode").addEventListener("change", (e) => { state.pitchCfg.mode = e.target.value; sendPitch(); });
+$("#keySel").addEventListener("change", (e) => { state.pitchCfg.keyRoot = parseInt(e.target.value, 10); sendPitch(); });
+$("#scaleSel").addEventListener("change", (e) => { state.pitchCfg.scaleName = e.target.value; sendPitch(); });
+$("#voicingSel").addEventListener("change", (e) => { state.pitchCfg.voicing = e.target.value; sendPitch(); });
+
+document.querySelectorAll("[data-toggle]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const fx = btn.dataset.toggle;
+    state.enabled[fx] = !state.enabled[fx];
+    btn.classList.toggle("on", state.enabled[fx]);
+    btn.closest(".fx").classList.toggle("off", !state.enabled[fx]);
+    applyEnabled(fx);
+  });
+});
+
+document.querySelectorAll("[data-param]").forEach((input) => {
+  input.addEventListener("input", () => {
+    const [fx, key] = input.dataset.param.split(".");
+    const v = parseFloat(input.value);
+    state.params[fx][key] = v;
+    input.previousElementSibling.querySelector("span").textContent = input.value;
+    if (fx === "reverb" && key === "size") setReverbSize(v);
+    applyAllParams();
+  });
+});
+</script>
+</body>
+</html>

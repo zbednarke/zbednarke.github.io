@@ -1472,6 +1472,70 @@ footer p[data-tone="offline"] { color: var(--red); }
 @media(max-width:900px){.clip-studio-right-column{grid-template-columns:1fr}.studio-output-dock{grid-template-columns:auto minmax(190px,1fr) minmax(250px,330px)}.studio-output-heading{display:none}}
 @media(max-width:760px){.clip-studio-screen{padding-bottom:48px}.clip-studio-header-tools{margin-top:20px}.studio-scan-menu{order:2}.clip-studio-summary{grid-template-columns:repeat(3,1fr)}.clip-studio-summary-status{grid-column:1/-1;border-top:1px solid var(--line)}.clip-studio-summary-status strong{text-align:left}.studio-output-dock{display:none}.studio-add-output{display:none}.clip-studio-waveform{height:70px}.studio-clip-boundary{width:15px;min-width:15px!important}.studio-clip-boundary.left{left:-7px}.studio-clip-boundary.right{right:-7px}}
 
+/* Yamaha Silent Brass live-effects tool */
+.virtuoso-effects {
+  --bg: #131314;
+  --bg-raised: #171617;
+  --panel: #1c1b1c;
+  --ink: #f3f3f2;
+  --text: #d8d5cf;
+  --muted: #9e9991;
+  --faint: #77716a;
+  --line: rgba(181, 147, 91, 0.2);
+  --brass: #b5935b;
+  --brass-light: #d2b77f;
+  --green: #a5c99f;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --serif: "Playfair Display", Georgia, serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.virtuoso-effects > .site-header,
+.virtuoso-effects > main > .hero,
+.virtuoso-effects > main > .stat-ribbon,
+.virtuoso-effects > main > section:not(#effects),
+.virtuoso-effects > footer { display: none; }
+.virtuoso-effects main { max-width: none; margin: 0 0 0 256px; }
+.virtuoso-effects .virtuoso-nav {
+  position: fixed;
+  z-index: 40;
+  inset: 0 auto 0 0;
+  width: 256px;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 24px 24px;
+  border-right: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.virtuoso-effects .virtuoso-mobile-header { display: none; }
+.effects-screen[hidden] { display: none !important; }
+.effects-screen { min-height: 100vh; padding: 46px clamp(30px, 4.2vw, 72px) 64px; background: var(--bg); }
+.effects-screen-header { display: flex; align-items: end; justify-content: space-between; gap: 40px; padding-bottom: 31px; border-bottom: 1px solid var(--line); }
+.effects-screen-header .eyebrow { margin: 0 0 8px; color: var(--brass); font: 600 9px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.effects-screen-header h1 { margin: 0; color: var(--ink); font: 600 clamp(42px, 4vw, 62px)/1.04 var(--serif); letter-spacing: -.035em; }
+.effects-screen-header > div:first-child > p:last-child { max-width: 680px; margin: 11px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.effects-safety-note { min-width: 230px; padding: 14px 17px; border: 1px solid var(--line); background: var(--panel); }
+.effects-safety-note span { display: block; color: var(--faint); font: 8px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.effects-safety-note strong { display: block; margin-top: 6px; color: var(--green); font: 600 10px/1.5 var(--mono); }
+.effects-frame-shell { margin-top: 28px; overflow: hidden; border: 1px solid var(--line); background: #14161a; }
+.effects-frame-shell iframe { width: 100%; height: max(720px, calc(100vh - 222px)); display: block; border: 0; background: #14161a; }
+
+@media (max-width: 1180px) {
+  .virtuoso-effects main { margin-left: 218px; }
+  .virtuoso-effects .virtuoso-nav { width: 218px; padding-left: 18px; padding-right: 18px; }
+}
+
+@media (max-width: 720px) {
+  .virtuoso-effects .virtuoso-nav { display: none; }
+  .virtuoso-effects .virtuoso-mobile-header { position: sticky; z-index: 35; top: 0; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); background: rgba(19, 19, 20, .96); backdrop-filter: blur(12px); }
+  .virtuoso-effects main { margin-left: 0; }
+  .effects-screen { padding: 28px 16px 36px; }
+  .effects-screen-header { display: block; }
+  .effects-screen-header h1 { font-size: 38px; }
+  .effects-safety-note { margin-top: 20px; }
+  .effects-frame-shell iframe { height: 1100px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
