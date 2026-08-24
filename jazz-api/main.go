@@ -72,12 +72,12 @@ type contextKey string
 const userSubjectKey contextKey = "user-subject"
 
 type practiceEntry struct {
-	ID      string `json:"id"`
-	Date    string `json:"date"`
-	Minutes int    `json:"minutes"`
-	Track   string `json:"track"`
-	Note    string `json:"note"`
-	Preset  bool   `json:"preset,omitempty"`
+	ID      string  `json:"id"`
+	Date    string  `json:"date"`
+	Minutes float64 `json:"minutes"`
+	Track   string  `json:"track"`
+	Note    string  `json:"note"`
+	Preset  bool    `json:"preset,omitempty"`
 }
 
 type campaignState struct {
@@ -482,7 +482,7 @@ func validateCampaignState(raw json.RawMessage) error {
 		}
 	}
 	for _, entry := range state.Practice {
-		if len(entry.ID) == 0 || len(entry.ID) > 160 || !datePattern.MatchString(entry.Date) || entry.Minutes < 1 || entry.Minutes > 360 || len(entry.Track) > 30 || len(entry.Note) > 100 {
+		if len(entry.ID) == 0 || len(entry.ID) > 160 || !datePattern.MatchString(entry.Date) || math.IsNaN(entry.Minutes) || math.IsInf(entry.Minutes, 0) || entry.Minutes <= 0 || entry.Minutes > 360 || len(entry.Track) > 30 || len(entry.Note) > 100 {
 			return errors.New("practice entry is invalid")
 		}
 	}

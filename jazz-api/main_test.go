@@ -21,6 +21,13 @@ func TestValidateCampaignState(t *testing.T) {
 	}
 }
 
+func TestValidateCampaignStateAcceptsFractionalPracticeMinutes(t *testing.T) {
+	shortPractice := json.RawMessage(`{"version":1,"skillLevels":{},"objectives":{},"repertoire":{},"bosses":{},"scene":{},"practice":[{"id":"short-take","date":"2026-08-23","minutes":0.125,"track":"trumpet","note":""}],"peopleCanCall":0}`)
+	if err := validateCampaignState(shortPractice); err != nil {
+		t.Fatalf("fractional practice minutes rejected: %v", err)
+	}
+}
+
 func TestAuthenticationRejectsMissingGatewayKey(t *testing.T) {
 	app := &application{cfg: config{GatewayKey: "secret"}}
 	handler := app.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

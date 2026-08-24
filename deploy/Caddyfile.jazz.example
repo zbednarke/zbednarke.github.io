@@ -8,6 +8,8 @@
 # If the parent site has a site-wide Permissions-Policy that disables the
 # microphone, scope that policy away from Jazz. Two header directives that set
 # the same field can leave the restrictive value on the Jazz response.
+# The live-effects tool is embedded from this same origin, so a site-wide
+# X-Frame-Options policy must be SAMEORIGIN rather than DENY.
 @not_jazz {
     not path /jazz /jazz/* /assets/jazz/*
 }
