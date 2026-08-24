@@ -12,7 +12,7 @@
   const state = {
     date: U.dateKey(new Date()), initialized: false, recordings: [], candidates: [], analysis: null,
     current: null, currentRecording: null, currentMode: "idle", media: null,
-    loadRequest: 0, playbackRequest: 0, savePromise: Promise.resolve(), saveTimers: new Map(),
+    loadRequest: 0, playbackRequest: 0, resumeAfterLoad: false, savePromise: Promise.resolve(), saveTimers: new Map(),
     playbackURLs: new Map(), players: new Map(), playerLoads: new Map(), playerUse: 0, warmToken: 0,
     project: Model.createProject(U.dateKey(new Date())), draggedOutputIndex: -1, addMode: false, addModeBusy: false, loadingDay: false,
   };
@@ -483,21 +483,34 @@
     }
   }
 
-  function seekPaused(media, startMS) {
+  function seekMedia(media, startMS, resumePlayback, isCurrent) {
     media.pause();
-    const seek = () => {
-      const duration = Number.isFinite(media.duration) ? media.duration : Infinity;
-      media.currentTime = Math.max(0, Math.min(duration, Number(startMS || 0) / 1000));
-      updatePlayhead();
-    };
-    if (media.readyState >= 1) seek();
-    else media.addEventListener("loadedmetadata", seek, { once: true });
+    return new Promise((resolve) => {
+      const seek = () => {
+        if (!isCurrent()) {
+          resolve();
+          return;
+        }
+        const duration = Number.isFinite(media.duration) ? media.duration : Infinity;
+        media.currentTime = Math.max(0, Math.min(duration, Number(startMS || 0) / 1000));
+        updatePlayhead();
+        if (!resumePlayback) {
+          resolve(true);
+          return;
+        }
+        Promise.resolve(media.play()).then(() => resolve(true), () => resolve(false));
+      };
+      if (media.readyState >= 1) seek();
+      else media.addEventListener("loadedmetadata", seek, { once: true });
+    });
   }
 
   async function loadPlayer(recording, startMS) {
     const request = ++state.playbackRequest;
     const key = playbackKey(recording);
     const warm = state.players.get(key);
+    const resumePlayback = state.resumeAfterLoad || Boolean(state.media && !state.media.paused);
+    state.resumeAfterLoad = resumePlayback;
     state.media?.pause();
     if (!warm) {
       $("#studio-media").innerHTML = '<p class="clip-studio-empty">Loading private playback…</p>';
@@ -508,12 +521,15 @@
       if (request !== state.playbackRequest || state.currentRecording?.id !== recording.id) return;
       state.media = entry.media;
       $("#studio-media").replaceChildren(entry.media);
-      seekPaused(entry.media, startMS);
-      setBufferStatus(entry.media.readyState >= 2 ? "" : "Buffering…");
+      const playbackContinued = await seekMedia(entry.media, startMS, resumePlayback, () => request === state.playbackRequest && state.currentRecording?.id === recording.id);
+      if (request !== state.playbackRequest || state.currentRecording?.id !== recording.id) return;
+      setBufferStatus(playbackContinued ? (entry.media.readyState >= 2 ? "" : "Buffering…") : "Press play to continue");
     } catch (error) {
       if (request !== state.playbackRequest) return;
       $("#studio-media").innerHTML = `<p class="clip-studio-empty">Playback unavailable · ${escapeHTML(error.message)}</p>`;
       setBufferStatus("");
+    } finally {
+      if (request === state.playbackRequest) state.resumeAfterLoad = false;
     }
   }
 
@@ -859,6 +875,7 @@
   function closePreview() {
     state.media?.pause();
     state.media = null;
+    state.resumeAfterLoad = false;
     state.playbackRequest++;
     $("#studio-playback-mode").textContent = "Focused playback";
     $("#studio-preview-title").textContent = "Choose a suggestion";
@@ -874,6 +891,7 @@
     if (event.detail?.view === "studio") initialize();
     else {
       state.media?.pause();
+      state.resumeAfterLoad = false;
       setAddClipMode(false);
     }
   });
