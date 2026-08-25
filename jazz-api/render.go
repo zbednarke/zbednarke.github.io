@@ -134,7 +134,7 @@ func (app *application) renderClipStudioMovie(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": renderID, "filename": filename, "url": downloadURL, "expiresAt": downloadExpires,
 		"retainedUntil": time.Now().Add(24 * time.Hour), "durationMs": totalDuration,
-		"quality": map[string]any{"video": "1080p H.264, CRF 18", "audio": "AAC 320 kbps playback + lossless ALAC master, 48 kHz, original levels", "audioLossless": true},
+		"quality": map[string]any{"video": "1080p H.264, CRF 18 (fast render)", "audio": "AAC 320 kbps playback + lossless ALAC master, 48 kHz, original levels", "audioLossless": true},
 	})
 }
 
@@ -186,7 +186,11 @@ func buildFFmpegRenderArgs(sources []renderSource) []string {
 		videoInput, audioInput := index*2, index*2+1
 		duration := formatFFmpegSeconds(sources[index].EndMS - sources[index].StartMS)
 		filters = append(filters,
-			fmt.Sprintf("[%d:v:0]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p,tpad=stop_mode=clone:stop_duration=%s,trim=duration=%s,setpts=PTS-STARTPTS[v%d]", videoInput, renderWidth, renderHeight, renderWidth, renderHeight, renderFrameRate, duration, duration, index),
+			// Normalize timestamps before any duration-sensitive filters. FFmpeg
+			// versions differ in whether input-side accurate seeks preserve a
+			// non-zero first PTS. Trimming before normalization can discard most of
+			// a valid late-position clip and make tpad clone its last frame.
+			fmt.Sprintf("[%d:v:0]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=%s,trim=duration=%s[v%d]", videoInput, renderWidth, renderHeight, renderWidth, renderHeight, renderFrameRate, duration, duration, index),
 			fmt.Sprintf("[%d:a:0]aresample=48000,aformat=sample_fmts=s32:channel_layouts=mono,apad=pad_dur=%s,atrim=duration=%s,asetpts=PTS-STARTPTS[a%d]", audioInput, duration, duration, index))
 		concatInputs.WriteString(fmt.Sprintf("[v%d][a%d]", index, index))
 	}
@@ -194,7 +198,7 @@ func buildFFmpegRenderArgs(sources []renderSource) []string {
 		fmt.Sprintf("%sconcat=n=%d:v=1:a=1[outv][joined]", concatInputs.String(), len(sources)),
 		"[joined]asplit=2[outaac][outlossless]")
 	args = append(args, "-filter_complex", strings.Join(filters, ";"), "-map", "[outv]", "-map", "[outaac]", "-map", "[outlossless]",
-		"-c:v", "libx264", "-preset", "medium", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p", "-threads", "2",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p", "-threads", "2",
 		"-c:a:0", "aac", "-b:a:0", "320k", "-ar:a:0", "48000", "-metadata:s:a:0", "title=Compatibility AAC", "-metadata:s:a:0", "handler_name=Compatibility AAC", "-disposition:a:0", "default",
 		"-c:a:1", "alac", "-ar:a:1", "48000", "-metadata:s:a:1", "title=Lossless ALAC Master", "-metadata:s:a:1", "handler_name=Lossless ALAC Master", "-disposition:a:1", "0",
 		"-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1")
